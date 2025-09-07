@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y python3-pip
 
 RUN pip install pyserial paho-mqtt --break-system-packages
 
-COPY ./mctomqtt.py /opt
+COPY ./*.py /opt
 COPY ./config.ini /opt
 
 
