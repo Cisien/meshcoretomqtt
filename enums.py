@@ -35,6 +35,6 @@ class PayloadType(Enum):
 
 class PayloadVersion(Enum):
     Version1 = 0x0
-    Verison2 = 0x1
+    Version2 = 0x1
     Version3 = 0x2
     Version4 = 0x3
