@@ -233,8 +233,8 @@ class MeshCoreBridge:
                     rtscts=False
                 )
                 self.ser.write(b"\r\n\r\n")
-                self.ser.flushInput()
-                self.ser.flushOutput()
+                self.ser.reset_input_buffer()
+                self.ser.reset_output_buffer()
                 logger.info(f"Connected to {port}")
                 return True
             except (serial.SerialException, OSError) as e:
@@ -244,8 +244,11 @@ class MeshCoreBridge:
         return False
 
     def set_repeater_time(self):
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        if not self.ser:
+            return False
+        
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
         epoc_time = int(calendar.timegm(time.gmtime()))
         timecmd=f'time {epoc_time}\r\n'
         self.ser.write(timecmd.encode())
@@ -258,9 +261,9 @@ class MeshCoreBridge:
     def get_repeater_name(self):
         if not self.ser:
             return False
-
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
         self.ser.write(b"get name\r\n")
         logger.debug("Sent 'get name' command")
 
@@ -281,8 +284,9 @@ class MeshCoreBridge:
     def get_repeater_pubkey(self):
         if not self.ser:
             return False
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
         self.ser.write(b"get public.key\r\n")
         logger.debug("Sent 'get public.key' command")
 
@@ -304,8 +308,8 @@ class MeshCoreBridge:
         if not self.ser:
             return False
         
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
         self.ser.write(b"get prv.key\r\n")
         logger.debug("Sent 'get prv.key' command")
 
@@ -336,8 +340,8 @@ class MeshCoreBridge:
         if not self.ser:
             return None
 
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
         self.ser.write(b"get radio\r\n")
         logger.debug("Sent 'get radio' command")
 
@@ -360,8 +364,8 @@ class MeshCoreBridge:
         if not self.ser:
             return None
 
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
         self.ser.write(b"ver\r\n")
         logger.debug("Sent 'ver' command")
 
@@ -384,8 +388,8 @@ class MeshCoreBridge:
         if not self.ser:
             return None
 
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
         self.ser.write(b"board\r\n")
         logger.debug("Sent 'board' command")
 
@@ -867,7 +871,8 @@ class MeshCoreBridge:
                     mqtt_client_info['client'].disconnect()
                 except:
                     pass
-            self.ser.close()
+            if self.ser:
+                self.ser.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
