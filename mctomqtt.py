@@ -789,6 +789,13 @@ class MeshCoreBridge:
             return
 
     def run(self):
+
+        self.debug = self.get_env_bool(f"DEBUG_ENABLED", self.debug)
+
+        if self.debug:
+            logger.setLevel(logging.DEBUG)
+            logger.debug("Debug mode enabled")
+
         if not self.connect_serial():
             return
 

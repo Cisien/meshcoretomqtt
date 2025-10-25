@@ -310,6 +310,9 @@ configure_mqtt_brokers() {
 # MeshCore to MQTT Configuration
 # This file contains your local overrides to the defaults in .env
 
+# Enable debug logging
+# MCTOMQTT_DEBUG_ENABLED=true
+
 # Update source (configured by installer)
 MCTOMQTT_UPDATE_REPO=$REPO
 MCTOMQTT_UPDATE_BRANCH=$BRANCH
