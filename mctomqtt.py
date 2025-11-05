@@ -9,6 +9,7 @@ import re
 import time
 import calendar
 import logging
+import random
 from datetime import datetime
 from time import sleep
 from auth_token import create_auth_token, read_private_key_file
@@ -63,6 +64,30 @@ def load_env_files():
     
     return env_vars
 
+def log_config_sources():
+    """Log configuration file sources and contents"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    env_file = os.path.join(script_dir, '.env')
+    env_local_file = os.path.join(script_dir, '.env.local')
+    
+    logger.info(f"Config directory: {script_dir}")
+    logger.debug(f".env file: {env_file} (exists: {os.path.exists(env_file)})")
+    logger.debug(f".env.local file: {env_local_file} (exists: {os.path.exists(env_local_file)})")
+    
+    if not os.path.exists(env_local_file):
+        logger.warning(".env.local file not found - using defaults from .env only")
+    else:
+        logger.debug("=== .env.local configuration ===")
+        try:
+            with open(env_local_file, 'r') as f:
+                for line in f:
+                    line = line.rstrip()
+                    if line and not line.startswith('#'):
+                        logger.debug(f"  {line}")
+        except Exception as e:
+            logger.error(f"Error reading .env.local: {e}")
+        logger.debug("================================")
+
 # Load environment configuration
 load_env_files()
 
@@ -74,8 +99,10 @@ PACKET_PATTERN = re.compile(
 )
 
 # Initialize logging (console only)
+log_level_str = os.getenv('MCTOMQTT_LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
@@ -94,6 +121,7 @@ class MeshCoreBridge:
         self.model = None
         self.client_version = self._load_client_version()
         self.ser = None
+        self.ser_lock = threading.Lock()  # Lock for thread-safe serial access
         self.mqtt_clients = []
         self.mqtt_connected = False
         self.connection_events = {}  # Track connection completion per broker
@@ -102,8 +130,26 @@ class MeshCoreBridge:
         self.reconnect_delay = 1.0  # Start with 1 second
         self.max_reconnect_delay = 120.0  # Max 2 minutes
         self.reconnect_backoff = 1.5  # Exponential backoff multiplier
+        self.reconnect_attempts = {}  # Track consecutive failed reconnect attempts per broker
+        self.max_reconnect_attempts = 12  # Exit after this many consecutive failures
         self.token_cache = {}  # Cache tokens with their creation time
         self.token_ttl = 3600  # 1 hour token TTL
+        self.ws_ping_threads = {}  # Track WebSocket ping threads per broker
+        
+        # Statistics tracking
+        self.stats = {
+            'start_time': time.time(),
+            'packets_rx': 0,
+            'packets_tx': 0,
+            'packets_rx_prev': 0,
+            'packets_tx_prev': 0,
+            'bytes_processed': 0,
+            'publish_failures': 0,
+            'last_stats_log': time.time(),
+            'reconnects': {},  # {broker_num: [timestamp1, timestamp2, ...]}
+            'device': {},  # Device stats from serial (battery, uptime, errors, etc.)
+            'device_prev': {}  # Previous device stats for delta calculation
+        }
         
         logger.info("Configuration loaded from environment variables")
     
@@ -182,7 +228,7 @@ class MeshCoreBridge:
         
         if use_auth_token:
             if not self.repeater_priv_key:
-                logger.error(f"MQTT{broker_num}: Private key not available from device for auth token")
+                logger.error(f"[MQTT{broker_num}] Private key not available from device for auth token")
                 return None, None
             
             # Check if we have a cached token that's still fresh
@@ -191,7 +237,7 @@ class MeshCoreBridge:
                 cached_token, created_at = self.token_cache[broker_num]
                 age = current_time - created_at
                 if age < (self.token_ttl - 300):  # Use cached token if it has >5min remaining
-                    logger.debug(f"MQTT{broker_num}: Using cached auth token (age: {age:.0f}s)")
+                    logger.debug(f"[MQTT{broker_num}] Using cached auth token (age: {age:.0f}s)")
                     username = f"v1_{self.repeater_pub_key.upper()}"
                     return username, cached_token
             
@@ -199,17 +245,38 @@ class MeshCoreBridge:
             try:
                 username = f"v1_{self.repeater_pub_key.upper()}"
                 audience = self.get_env(f"MQTT{broker_num}_TOKEN_AUDIENCE", "")
+                
+                # Security check: Only include email/owner if using TLS with verification
+                # NEVER send email/owner over plaintext or unverified connections
+                use_tls = self.get_env_bool(f"MQTT{broker_num}_USE_TLS", False)
+                tls_verify = self.get_env_bool(f"MQTT{broker_num}_TLS_VERIFY", True)
+                secure_connection = use_tls and tls_verify
+                
+                owner = self.get_env(f"MQTT{broker_num}_TOKEN_OWNER", "")
+                email = self.get_env(f"MQTT{broker_num}_TOKEN_EMAIL", "")
+                
                 claims = {}
                 if audience:
                     claims['aud'] = audience
                 
+                if secure_connection:
+                    if owner:
+                        claims['owner'] = owner
+                    if email:
+                        claims['email'] = email.lower()
+                else:
+                    if owner or email:
+                        logger.debug(f"[MQTT{broker_num}] Skipping email/owner in JWT - TLS and TLS_VERIFY must both be enabled for secure transmission")
+                
+                claims['client'] = self.client_version
+                
                 # Generate token with 1 hour expiry
                 password = create_auth_token(self.repeater_pub_key, self.repeater_priv_key, expiry_seconds=self.token_ttl, **claims)
                 self.token_cache[broker_num] = (password, current_time)
-                logger.info(f"MQTT{broker_num}: Generated fresh auth token (1h expiry)")
+                logger.debug(f"[MQTT{broker_num}] Generated fresh auth token (1h expiry)")
                 return username, password
             except Exception as e:
-                logger.error(f"MQTT{broker_num}: Failed to generate auth token: {e}")
+                logger.error(f"[MQTT{broker_num}] Failed to generate auth token: {e}")
                 return None, None
         else:
             username = self.get_env(f"MQTT{broker_num}_USERNAME", "")
@@ -269,9 +336,11 @@ class MeshCoreBridge:
         logger.debug(f"Raw response: {response}")
 
         if "-> >" in response:
-            self.repeater_name = response.split("-> >")[1].strip()
-            if '\n' in self.repeater_name:
-                self.repeater_name = self.repeater_name.split('\n')[0]
+            name = response.split("-> >")[1].strip()            
+            if '\n' in name:
+                name = name.split('\n')[0]            
+            name = name.replace('\r', '').strip()
+            self.repeater_name = name
             logger.info(f"Repeater name: {self.repeater_name}")
             return True
         
@@ -291,9 +360,18 @@ class MeshCoreBridge:
         logger.debug(f"Raw response: {response}")
 
         if "-> >" in response:
-            self.repeater_pub_key = response.split("-> >")[1].strip()
-            if '\n' in self.repeater_pub_key:
-                self.repeater_pub_key = self.repeater_pub_key.split('\n')[0]
+            pub_key = response.split("-> >")[1].strip()            
+            if '\n' in pub_key:
+                pub_key = pub_key.split('\n')[0]            
+            pub_key_clean = pub_key.replace(' ', '').replace('\r', '').replace('\n', '')
+            
+            # Validate public key format (should be 64 hex characters)
+            if not pub_key_clean or len(pub_key_clean) != 64 or not all(c in '0123456789ABCDEFabcdef' for c in pub_key_clean):
+                logger.error(f"Invalid public key format: {repr(pub_key_clean)} (extracted from: {repr(pub_key)})")
+                return False
+            
+            # Normalize to uppercase
+            self.repeater_pub_key = pub_key_clean.upper()
             logger.info(f"Repeater pub key: {self.repeater_pub_key}")
             return True
         
@@ -405,11 +483,244 @@ class MeshCoreBridge:
         logger.warning("Failed to get board type from response")
         return None
 
+    def get_device_stats(self):
+        """Query the repeater for device statistics (battery, uptime, errors, queue, radio stats)"""
+        if not self.ser:
+            return {}
+        
+        stats = {}
+        
+        with self.ser_lock:
+            # Get stats-core: battery_mv, uptime_secs, errors, queue_len
+            self.ser.flushInput()
+            self.ser.flushOutput()
+            self.ser.write(b"stats-core\r\n")
+            logger.debug("Sent 'stats-core' command")
+            
+            sleep(0.5)
+            response = self.ser.read_all().decode(errors='replace')
+            logger.debug(f"Raw stats-core response: {response}")
+            
+            if "-> " in response and "Unknown command" not in response:
+                try:
+                    json_str = response.split("-> ", 1)[1].strip()
+                    json_str = json_str.split('\n')[0].replace('\r', '').strip()
+                    core_stats = json.loads(json_str)
+                    if 'battery_mv' in core_stats:
+                        stats['battery_mv'] = core_stats['battery_mv']
+                    if 'uptime_secs' in core_stats:
+                        stats['uptime_secs'] = core_stats['uptime_secs']
+                    if 'errors' in core_stats:
+                        stats['errors'] = core_stats['errors']
+                    if 'queue_len' in core_stats:
+                        stats['queue_len'] = core_stats['queue_len']
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug(f"Failed to parse stats-core: {e}")
+            
+            # Get stats-radio: noise_floor, tx_air_secs, rx_air_secs
+            self.ser.flushInput()
+            self.ser.flushOutput()
+            self.ser.write(b"stats-radio\r\n")
+            logger.debug("Sent 'stats-radio' command")
+            
+            sleep(0.5)
+            response = self.ser.read_all().decode(errors='replace')
+            logger.debug(f"Raw stats-radio response: {response}")
+            
+            if "-> " in response and "Unknown command" not in response:
+                try:
+                    json_str = response.split("-> ", 1)[1].strip()
+                    json_str = json_str.split('\n')[0].replace('\r', '').strip()
+                    radio_stats = json.loads(json_str)
+                    if 'noise_floor' in radio_stats:
+                        stats['noise_floor'] = radio_stats['noise_floor']
+                    if 'tx_air_secs' in radio_stats:
+                        stats['tx_air_secs'] = radio_stats['tx_air_secs']
+                    if 'rx_air_secs' in radio_stats:
+                        stats['rx_air_secs'] = radio_stats['rx_air_secs']
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug(f"Failed to parse stats-radio: {e}")
+        
+        return stats
+
+    def _websocket_ping_loop(self, broker_num, mqtt_client, transport):
+        """Send WebSocket PING frames periodically to keep connection alive"""
+        if transport != "websockets":
+            return
+        
+        ping_interval = 45  # Send WebSocket ping every 45 seconds
+        
+        while broker_num in self.ws_ping_threads and self.ws_ping_threads[broker_num].get('active', False):
+            sleep(ping_interval)
+            
+            try:
+                # Access the underlying WebSocket object in paho-mqtt
+                if hasattr(mqtt_client, '_sock') and mqtt_client._sock:
+                    sock = mqtt_client._sock
+                    # Check if it's a WebSocket
+                    if hasattr(sock, 'ping'):
+                        sock.ping()
+                        logger.debug(f"[MQTT{broker_num}] Sent WebSocket PING")
+            except Exception as e:
+                logger.debug(f"[MQTT{broker_num}] WebSocket PING failed: {e}")
+                # Don't break the loop - connection might recover
+    
+    def _stats_logging_loop(self):
+        """Log statistics every 5 minutes"""
+        stats_interval = 300
+        
+        while not self.should_exit:
+            sleep(stats_interval)
+            
+            if self.should_exit:
+                break
+            
+            # Fetch fresh device stats from serial
+            logger.debug("[STATS] Fetching fresh device stats from serial...")
+            device_stats = self.get_device_stats()
+            if device_stats:
+                self.stats['device'] = device_stats
+                logger.debug(f"[STATS] Updated device stats: {device_stats}")
+                # Publish updated status with new stats
+                self.publish_status("online")
+            else:
+                logger.debug("[STATS] No device stats received")
+            
+            # Calculate uptime
+            uptime_seconds = int(time.time() - self.stats['start_time'])
+            uptime_hours = uptime_seconds // 3600
+            uptime_minutes = (uptime_seconds % 3600) // 60
+            
+            if uptime_hours > 0:
+                uptime_str = f"{uptime_hours}h {uptime_minutes}m"
+            else:
+                uptime_str = f"{uptime_minutes}m"
+            
+            # Calculate data volume with appropriate units
+            bytes_actual = self.stats['bytes_processed']
+            if bytes_actual < 1024:
+                data_str = f"{bytes_actual}B"
+            elif bytes_actual < 1024 * 1024:
+                data_str = f"{bytes_actual / 1024:.1f}KB"
+            elif bytes_actual < 1024 * 1024 * 1024:
+                data_str = f"{bytes_actual / (1024 * 1024):.1f}MB"
+            else:
+                data_str = f"{bytes_actual / (1024 * 1024 * 1024):.2f}GB"
+            
+            total_brokers = len(self.mqtt_clients)
+            connected_brokers = sum(1 for info in self.mqtt_clients if info.get('connected', False))
+            
+            # Calculate packets per minute over the last interval (5 minutes)
+            time_elapsed = time.time() - self.stats['last_stats_log']
+            packets_rx_delta = self.stats['packets_rx'] - self.stats['packets_rx_prev']
+            packets_tx_delta = self.stats['packets_tx'] - self.stats['packets_tx_prev']
+            packets_per_min = ((packets_rx_delta + packets_tx_delta) / time_elapsed) * 60 if time_elapsed > 0 else 0
+            
+            # Store current counts for next interval
+            self.stats['packets_rx_prev'] = self.stats['packets_rx']
+            self.stats['packets_tx_prev'] = self.stats['packets_tx']
+            
+            # Prune reconnect timestamps older than 24 hours and build reconnect stats
+            current_time = time.time()
+            cutoff_time = current_time - 86400  # 24 hours in seconds
+            reconnect_stats = []
+            
+            for broker_num in sorted(self.stats['reconnects'].keys()):
+                # Prune old timestamps
+                self.stats['reconnects'][broker_num] = [
+                    ts for ts in self.stats['reconnects'][broker_num] if ts > cutoff_time
+                ]
+                
+                # Count reconnects in last 24 hours
+                reconnect_count = len(self.stats['reconnects'][broker_num])
+                if reconnect_count > 0:
+                    reconnect_stats.append(f"MQTT{broker_num}:{reconnect_count}")
+            
+            reconnect_str = ", ".join(reconnect_stats) if reconnect_stats else "none"
+            
+            # Log the main stats
+            logger.info(
+                f"[SERVICE] Uptime: {uptime_str} | "
+                f"RX/TX: {self.stats['packets_rx']}/{self.stats['packets_tx']} (5m: {packets_per_min:.1f}/min) | "
+                f"RX bytes: {data_str} | "
+                f"MQTT: {connected_brokers}/{total_brokers} | "
+                f"Reconnects/24h: {reconnect_str} | "
+                f"Failures: {self.stats['publish_failures']}"
+            )
+            
+            # Log device stats separately if available
+            if self.stats['device']:
+                ds = self.stats['device']
+                parts = []
+                
+                if 'noise_floor' in ds:
+                    parts.append(f"Noise: {ds['noise_floor']}dB")
+                
+                # Radio airtime stats with utilization (calculated over interval, not total uptime)
+                if 'tx_air_secs' in ds and 'rx_air_secs' in ds and 'uptime_secs' in ds:
+                    tx_secs_total = ds['tx_air_secs']
+                    rx_secs_total = ds['rx_air_secs']
+                    uptime_secs = ds['uptime_secs']
+                    
+                    # Calculate delta from previous reading
+                    prev = self.stats.get('device_prev', {})
+                    if prev and 'tx_air_secs' in prev and 'rx_air_secs' in prev and 'uptime_secs' in prev:
+                        # Delta calculation (airtime since last reading)
+                        tx_delta = tx_secs_total - prev['tx_air_secs']
+                        rx_delta = rx_secs_total - prev['rx_air_secs']
+                        uptime_delta = uptime_secs - prev['uptime_secs']
+                        
+                        if uptime_delta > 0:
+                            tx_util = (tx_delta / uptime_delta) * 100
+                            rx_util = (rx_delta / uptime_delta) * 100
+                            parts.append(f"Air (5m): Tx {tx_delta:.1f}s ({tx_util:.2f}%), Rx {rx_delta:.1f}s ({rx_util:.2f}%)")
+                        else:
+                            parts.append(f"Air (5m): Tx {tx_delta:.1f}s, Rx {rx_delta:.1f}s")
+                    else:
+                        # Initial reading - show totals
+                        parts.append(f"Air (5m): Tx {tx_secs_total}s, Rx {rx_secs_total}s")
+                elif 'tx_air_secs' in ds and 'rx_air_secs' in ds:
+                    parts.append(f"Air (5m): Tx {ds['tx_air_secs']}s, Rx {ds['rx_air_secs']}s")
+                
+                # Battery
+                if 'battery_mv' in ds:
+                    parts.append(f"Battery: {ds['battery_mv']}mV")
+                
+                # Device uptime
+                if 'uptime_secs' in ds:
+                    dev_uptime_secs = ds['uptime_secs']
+                    dev_uptime_hours = dev_uptime_secs // 3600
+                    dev_uptime_minutes = (dev_uptime_secs % 3600) // 60
+                    
+                    if dev_uptime_hours > 0:
+                        dev_uptime_str = f"{dev_uptime_hours}h {dev_uptime_minutes}m"
+                    else:
+                        dev_uptime_str = f"{dev_uptime_minutes}m"
+                    
+                    parts.append(f"Uptime: {dev_uptime_str}")
+                
+                # Errors
+                if 'errors' in ds:
+                    parts.append(f"Errors: {ds['errors']}")
+                
+                # Queue
+                if 'queue_len' in ds:
+                    parts.append(f"Queue: {ds['queue_len']}")
+                
+                if parts:
+                    logger.info(f"[DEVICE] {' | '.join(parts)}")
+            
+            # Save current device stats as previous for next interval calculation
+            if self.stats['device']:
+                self.stats['device_prev'] = self.stats['device'].copy()
+            
+            self.stats['last_stats_log'] = time.time()
+    
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         broker_name = userdata.get('name', 'unknown') if userdata else 'unknown'
         broker_num = userdata.get('broker_num', None) if userdata else None
         
-        # Signal that this broker has completed its connection attempt (success or fail)
+        # Signal that this broker has completed its connection attempt
         if broker_num in self.connection_events:
             self.connection_events[broker_num].set()
         
@@ -417,63 +728,110 @@ class MeshCoreBridge:
             # Reset reconnect delay on successful connection
             self.reconnect_delay = 1.0
             
-            # Check if this specific broker was already connected
-            was_broker_connected = False
-            for mqtt_info in self.mqtt_clients:
-                if mqtt_info['broker_num'] == broker_num:
-                    was_broker_connected = mqtt_info.get('connected', False)
-                    mqtt_info['connected'] = True
+            # Find the mqtt_info for this broker
+            mqtt_info = None
+            for info in self.mqtt_clients:
+                if info['broker_num'] == broker_num:
+                    mqtt_info = info
                     break
             
-            # Mark that at least one broker is connected
-            self.mqtt_connected = True
+            if not mqtt_info:
+                logger.error(f"[MQTT{broker_num}] on_connect fired but broker not in mqtt_clients list")
+                return
             
-            if not was_broker_connected:
-                logger.info(f"Connected to MQTT broker: {broker_name}")
+            current_time = time.time()
+            was_connected = mqtt_info.get('connected', False)
+            is_first_connect = mqtt_info.get('connect_time', 0) == 0
+            
+            # Set connected state
+            mqtt_info['connected'] = True
+            mqtt_info['connecting_since'] = 0  # Clear connecting timestamp
+            mqtt_info['connect_time'] = current_time
+            
+            if was_connected and not is_first_connect:
+                logger.info(f"[MQTT{broker_num}] Reconnected to broker")
+            elif is_first_connect:
+                logger.info(f"[MQTT{broker_num}] Connected to broker")
             else:
-                logger.info(f"Reconnected to MQTT broker: {broker_name}")
+                # was_connected=False but connect_time > 0 means we already logged this connection
+                logger.debug(f"[MQTT{broker_num}] Connection state updated")
             
-            # Publish online status once on connection
-            self.publish_status("online", client, broker_num)
+            # Track global connected state
+            if not self.mqtt_connected:
+                self.mqtt_connected = True
+            
+            # Publish online status
+            status_topic = self.get_topic("status", broker_num)
+            status_payload = json.dumps(self.build_status_message("online"))
+            qos = self.get_env_int(f"MQTT{broker_num}_QOS", 0)
+            retain = self.get_env_bool(f"MQTT{broker_num}_RETAIN", True)
+            
+            try:
+                result = client.publish(status_topic, status_payload, qos=qos, retain=retain)
+                if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                    # Only reset failed_attempts if we had a previous successful connection
+                    # that lasted >= 120 seconds. This prevents rapid connect/disconnect cycles
+                    # from resetting the counter and avoiding the max_reconnect_attempts exit.
+                    # On first connection, we'll reset it after 120 seconds of stability.
+                    pass  # Don't reset failed_attempts here - let it reset after 120s of stability
+            except Exception as e:
+                logger.error(f"[MQTT{broker_num}] Failed to publish online status: {e}")
         else:
-            # Check if this is an authorization error
-            if rc == 5:  # MQTT_ERR_AUTH / Not authorized
-                logger.error(f"MQTT connection failed for {broker_name}: Not authorized - token will be regenerated on next reconnect")
-                # Clear the cached token to force regeneration on next attempt
-                if broker_num in self.token_cache:
-                    logger.info(f"MQTT{broker_num}: Clearing cached token due to auth failure")
-                    del self.token_cache[broker_num]
-                # Mark the client info for recreation
-                for mqtt_info in self.mqtt_clients:
-                    if mqtt_info['broker_num'] == broker_num:
-                        mqtt_info['needs_recreate'] = True
-                        logger.info(f"MQTT{broker_num}: Marked for recreation with fresh token")
-                        break
-            else:
-                logger.error(f"MQTT connection failed for {broker_name} with code {rc}")
+            logger.error(f"[MQTT{broker_num}] Connection failed with code: {rc}")
+
 
     def on_mqtt_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         broker_name = userdata.get('name', 'unknown') if userdata else 'unknown'
         broker_num = userdata.get('broker_num', None) if userdata else None
         
-        # Log more details about the disconnect
-        logger.warning(f"Disconnected from MQTT broker {broker_name} (code: {reason_code}, flags: {disconnect_flags}, properties: {properties})")
+        # Stop WebSocket ping thread for this broker (don't delete yet, reconnect might reuse broker_num)
+        if broker_num in self.ws_ping_threads:
+            self.ws_ping_threads[broker_num]['active'] = False
         
         # Mark this specific client as disconnected
+        already_disconnected = False
         for mqtt_info in self.mqtt_clients:
-            if mqtt_info['client'] == client:
+            if mqtt_info['broker_num'] == broker_num:
+                already_disconnected = not mqtt_info.get('connected', False)
                 mqtt_info['connected'] = False
+                mqtt_info['connecting_since'] = 0  # Clear connecting timestamp on disconnect
                 mqtt_info['reconnect_at'] = time.time() + self.reconnect_delay
+                
+                # If connection was short-lived (< 120 seconds), count it as a failure
+                connect_time = mqtt_info.get('connect_time', 0)
+                if connect_time > 0 and (time.time() - connect_time) < 120:
+                    mqtt_info['failed_attempts'] = mqtt_info.get('failed_attempts', 0) + 1
+                    logger.warning(f"[MQTT{broker_num}] Short-lived connection detected (failed_attempts: {mqtt_info['failed_attempts']})")
+                elif connect_time > 0:
+                    # Connection lasted >= 120 seconds - this was a stable connection
+                    # Reset failed_attempts counter
+                    if mqtt_info.get('failed_attempts', 0) > 0:
+                        logger.info(f"[MQTT{broker_num}] Stable connection ended after {int(time.time() - connect_time)}s - resetting failure counter")
+                        mqtt_info['failed_attempts'] = 0
+                
                 break
+        
+        # Only log if this is the first disconnect event (avoid duplicate logs from paho-mqtt)
+        if not already_disconnected:
+            logger.warning(f"[MQTT{broker_num}] Disconnected (code: {reason_code}, flags: {disconnect_flags}, properties: {properties})")
+            
+            # Track disconnect event for stats (only if this was a connected broker)
+            if mqtt_info.get('connect_time', 0) > 0:
+                current_time = time.time()
+                if 'reconnects' not in self.stats:
+                    self.stats['reconnects'] = {}
+                if broker_num not in self.stats['reconnects']:
+                    self.stats['reconnects'][broker_num] = []
+                self.stats['reconnects'][broker_num].append(current_time)
         
         # Check if ALL brokers are disconnected
         all_disconnected = all(not info.get('connected', False) for info in self.mqtt_clients)
         if all_disconnected:
             self.mqtt_connected = False
 
-    def publish_status(self, status, client=None, broker_num=None):
-        """Publish status with additional information"""
-        status_msg = {
+    def build_status_message(self, status, include_stats=True):
+        """Build a status message with all required fields"""
+        message = {
             "status": status,
             "timestamp": datetime.now().isoformat(),
             "origin": self.repeater_name,
@@ -483,17 +841,30 @@ class MeshCoreBridge:
             "firmware_version": self.firmware_version if self.firmware_version else "unknown",
             "client_version": self.client_version
         }
+        
+        # Add device stats if available and requested
+        if include_stats and self.stats['device']:
+            message['stats'] = self.stats['device']
+        
+        return message
+    
+    def publish_status(self, status, client=None, broker_num=None):
+        """Publish online status with stats (NOT retained)"""
+        status_msg = self.build_status_message(status, include_stats=True)
         status_topic = self.get_topic("status", broker_num)
+        
         if client:
-            self.safe_publish(status_topic, json.dumps(status_msg), retain=True, client=client, broker_num=broker_num)
+            self.safe_publish(status_topic, json.dumps(status_msg), retain=False, client=client, broker_num=broker_num)
         else:
-            self.safe_publish(status_topic, json.dumps(status_msg), retain=True)
+            self.safe_publish(status_topic, json.dumps(status_msg), retain=False)
+        
         logger.debug(f"Published status: {status}")
 
     def safe_publish(self, topic, payload, retain=False, client=None, broker_num=None):
         """Publish to one or all MQTT brokers"""
         if not self.mqtt_connected:
             logger.warning(f"Not connected - skipping publish to {topic}")
+            self.stats['publish_failures'] += 1
             return False
 
         success = False
@@ -513,153 +884,203 @@ class MeshCoreBridge:
                 
                 result = mqtt_client.publish(topic, payload, qos=qos, retain=retain)
                 if result.rc != mqtt.MQTT_ERR_SUCCESS:
-                    logger.error(f"Publish failed to {topic} on MQTT{broker_num}: {mqtt.error_string(result.rc)}")
+                    logger.error(f"[MQTT{broker_num}] Publish failed to {topic}: {mqtt.error_string(result.rc)}")
+                    self.stats['publish_failures'] += 1
                 else:
-                    logger.debug(f"Published to {topic} on MQTT{broker_num}")
+                    logger.debug(f"[MQTT{broker_num}] Published to {topic}")
                     success = True
             except Exception as e:
-                logger.error(f"Publish error to {topic} on MQTT{broker_num}: {str(e)}")
+                logger.error(f"[MQTT{broker_num}] Publish error to {topic}: {str(e)}")
+                self.stats['publish_failures'] += 1
         
         return success
 
-    def connect_mqtt_broker(self, broker_num):
-        """Connect to a single MQTT broker"""
+    def _create_mqtt_client(self, broker_num):
+        """
+        Internal: Create and configure an MQTT client (doesn't connect).
+        Separated for clarity and testing.
+        """
+        client_id = self.sanitize_client_id(self.repeater_pub_key)
+        if broker_num > 1:
+            client_id += f"_{broker_num}"
+        
+        transport = self.get_env(f"MQTT{broker_num}_TRANSPORT", "tcp")
+        
+        mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=client_id,
+            clean_session=True,
+            transport=transport
+        )
+        
+        mqtt_client.user_data_set({
+            'name': f"MQTT{broker_num}",
+            'broker_num': broker_num
+        })
+        
+        # Set credentials
+        username, password = self.generate_auth_credentials(broker_num)
+        if username is None:
+            return None
+        if username:
+            mqtt_client.username_pw_set(username, password)
+        
+        # Set LWT
+        lwt_topic = self.get_topic("status", broker_num)
+        lwt_payload = json.dumps(self.build_status_message("offline", include_stats=False))
+        lwt_qos = self.get_env_int(f"MQTT{broker_num}_QOS", 0)
+        lwt_retain = self.get_env_bool(f"MQTT{broker_num}_RETAIN", True)
+        mqtt_client.will_set(lwt_topic, lwt_payload, qos=lwt_qos, retain=lwt_retain)
+        
+        # Set callbacks
+        mqtt_client.on_connect = self.on_mqtt_connect
+        mqtt_client.on_disconnect = self.on_mqtt_disconnect
+        
+        # Configure TLS
+        use_tls = self.get_env_bool(f"MQTT{broker_num}_USE_TLS", False)
+        if use_tls:
+            import ssl
+            tls_verify = self.get_env_bool(f"MQTT{broker_num}_TLS_VERIFY", True)
+            if tls_verify:
+                mqtt_client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+                mqtt_client.tls_insecure_set(False)
+            else:
+                mqtt_client.tls_set(cert_reqs=ssl.CERT_NONE)
+                mqtt_client.tls_insecure_set(True)
+                logger.warning(f"[MQTT{broker_num}] TLS verification disabled")
+        
+        # Configure WebSocket
+        if transport == "websockets":
+            mqtt_client.ws_set_options(path="/", headers=None)
+        
+        return mqtt_client
+    
+    def create_and_connect_broker(self, broker_num):
+        """
+        Create a fresh MQTT client and connect it.
+        This is the ONLY way to create/connect a broker.
+        Returns client_info dict on success, None on failure.
+        """
         if not self.repeater_name:
-            logger.error("Cannot connect to MQTT without repeater name")
+            logger.error("[MQTT] Cannot connect without repeater name")
             return None
 
-        # Connect to broker
-        try:
-            if not self.get_env_bool(f"MQTT{broker_num}_ENABLED", False):
-                logger.debug(f"MQTT broker {broker_num} is disabled, skipping")
-                return None
+        if not self.get_env_bool(f"MQTT{broker_num}_ENABLED", False):
+            logger.debug(f"[MQTT{broker_num}] Disabled, skipping")
+            return None
 
-            client_id = self.sanitize_client_id(self.repeater_pub_key)
-            if broker_num > 1:
-                client_id += f"_{broker_num}"
-            
-            logger.info(f"Connecting to MQTT{broker_num} with client ID: {client_id}")
-            
-            transport = self.get_env(f"MQTT{broker_num}_TRANSPORT", "tcp")
-            
-            mqtt_client = mqtt.Client(
-                mqtt.CallbackAPIVersion.VERSION2,
-                client_id=client_id,
-                clean_session=False,
-                transport=transport
-            )
-            
-            mqtt_client.user_data_set({
-                'name': f"MQTT{broker_num}",
-                'broker_num': broker_num
-            })
-            
-            # Generate authentication credentials
-            username, password = self.generate_auth_credentials(broker_num)
-            if username is None:
-                return None
-            
-            if username:
-                mqtt_client.username_pw_set(username, password)
-            
-            lwt_topic = self.get_topic("status", broker_num)
-            lwt_payload = json.dumps({
-                "status": "offline",
-                "timestamp": datetime.now().isoformat(),
-                "repeater": self.repeater_name,
-                "repeater_id": self.repeater_pub_key
-            })
-            lwt_qos = self.get_env_int(f"MQTT{broker_num}_QOS", 0)
-            lwt_retain = self.get_env_bool(f"MQTT{broker_num}_RETAIN", True)
-            
-            mqtt_client.will_set(lwt_topic, lwt_payload, qos=lwt_qos, retain=lwt_retain)
-            logger.debug(f"MQTT{broker_num}: Set LWT")
-            
-            mqtt_client.on_connect = self.on_mqtt_connect
-            mqtt_client.on_disconnect = self.on_mqtt_disconnect
-            
-            
-            server = self.get_env(f"MQTT{broker_num}_SERVER", "")
-            if not server:
-                logger.error(f"MQTT{broker_num}: Server not configured")
-                return None
-                
-            port = self.get_env_int(f"MQTT{broker_num}_PORT", 1883)
-            
-            use_tls = self.get_env_bool(f"MQTT{broker_num}_USE_TLS", False)
-            if use_tls:
-                import ssl
-                tls_verify = self.get_env_bool(f"MQTT{broker_num}_TLS_VERIFY", True)
-                
-                if tls_verify:
-                    mqtt_client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-                    mqtt_client.tls_insecure_set(False)
-                    logger.debug(f"MQTT{broker_num}: TLS/SSL enabled with certificate verification")
-                else:
-                    mqtt_client.tls_set(cert_reqs=ssl.CERT_NONE)
-                    mqtt_client.tls_insecure_set(True)
-                    logger.warning(f"MQTT{broker_num}: TLS certificate verification disabled (insecure)")
-            
-            if transport == "websockets":
-                mqtt_client.ws_set_options(
-                    path="/",
-                    headers=None
-                )
-                logger.debug(f"MQTT{broker_num}: WebSocket transport configured")
-            
-            keepalive = self.get_env_int(f"MQTT{broker_num}_KEEPALIVE", 120)
-            mqtt_client.connect(server, port, keepalive=keepalive)    
+        # Get config
+        server = self.get_env(f"MQTT{broker_num}_SERVER", "")
+        if not server:
+            logger.error(f"[MQTT{broker_num}] No server configured")
+            return None
+        
+        port = self.get_env_int(f"MQTT{broker_num}_PORT", 1883)
+        transport = self.get_env(f"MQTT{broker_num}_TRANSPORT", "tcp")
+        keepalive = self.get_env_int(f"MQTT{broker_num}_KEEPALIVE", 60)
+        use_tls = self.get_env_bool(f"MQTT{broker_num}_USE_TLS", False)
+        
+        logger.debug(f"[MQTT{broker_num}] Creating fresh client")
+        
+        # Create client
+        mqtt_client = self._create_mqtt_client(broker_num)
+        if not mqtt_client:
+            return None
+        
+        # Connect
+        try:
+            mqtt_client.connect(server, port, keepalive=keepalive)
             mqtt_client.loop_start()
             
-            logger.info(f"Connected to MQTT{broker_num} at {server}:{port} (transport={transport}, tls={use_tls})")
+            # Start WebSocket ping thread if needed
+            if transport == "websockets":
+                self.ws_ping_threads[broker_num] = {'active': True}
+                ping_thread = threading.Thread(
+                    target=self._websocket_ping_loop,
+                    args=(broker_num, mqtt_client, transport),
+                    daemon=True,
+                    name=f"WS-Ping-MQTT{broker_num}"
+                )
+                ping_thread.start()
+            
+            logger.info(f"[MQTT{broker_num}] Connecting to {server}:{port} (transport={transport}, tls={use_tls}, keepalive={keepalive}s)")
+            
             return {
                 'client': mqtt_client,
                 'broker_num': broker_num,
                 'server': server,
                 'port': port,
                 'connected': False,
-                'reconnect_at': 0
+                'connecting_since': time.time(),
+                'connect_time': 0,
+                'reconnect_at': 0,
+                'failed_attempts': 0
             }
-            
         except Exception as e:
-            logger.error(f"MQTT connection error for MQTT{broker_num}: {str(e)}")
+            logger.error(f"[MQTT{broker_num}] Failed to connect: {e}")
             return None
 
     def connect_mqtt(self):
-        """Connect to all configured MQTT brokers and wait for all to complete initial connection"""
-        # Try to connect to MQTT1, MQTT2, MQTT3, MQTT4 (can expand if needed)
+        """Initial connection to all configured MQTT brokers"""
+        logger.debug("=== MQTT Broker Configuration ===")
         for broker_num in range(1, 5):
-            # Create an event for this broker to signal connection completion
+            enabled = self.get_env_bool(f"MQTT{broker_num}_ENABLED", False)
+            if enabled:
+                server = self.get_env(f"MQTT{broker_num}_SERVER", "")
+                port = self.get_env_int(f"MQTT{broker_num}_PORT", 1883)
+                transport = self.get_env(f"MQTT{broker_num}_TRANSPORT", "tcp")
+                use_tls = self.get_env_bool(f"MQTT{broker_num}_USE_TLS", False)
+                use_auth_token = self.get_env_bool(f"MQTT{broker_num}_USE_AUTH_TOKEN", False)
+                logger.debug(f"[MQTT{broker_num}] ENABLED - {server}:{port} (transport={transport}, tls={use_tls}, auth_token={use_auth_token})")
+            else:
+                logger.debug(f"[MQTT{broker_num}] DISABLED")
+        logger.debug("=================================")
+        
+        # Connect to all enabled brokers
+        for broker_num in range(1, 5):
             self.connection_events[broker_num] = threading.Event()
             
-            client_info = self.connect_mqtt_broker(broker_num)
+            client_info = self.create_and_connect_broker(broker_num)
             if client_info:
                 self.mqtt_clients.append(client_info)
         
         if len(self.mqtt_clients) == 0:
-            logger.error("Failed to connect to any MQTT broker")
+            logger.error("[MQTT] Failed to connect to any broker")
             return False
         
-        logger.info(f"Initiated connection to {len(self.mqtt_clients)} MQTT broker(s)")
+        logger.info(f"[MQTT] Initiated connection to {len(self.mqtt_clients)} broker(s)")
         
-        # Wait for all brokers to complete their initial connection attempt
+        # Wait for all brokers to complete initial connection attempt
         max_wait = 10  # seconds per broker
         for mqtt_info in self.mqtt_clients:
             broker_num = mqtt_info['broker_num']
             event = self.connection_events.get(broker_num)
             if event:
-                # Wait for this specific broker to complete (success or fail)
                 event.wait(timeout=max_wait)
         
         # Check if at least one connected
         if not self.mqtt_connected:
-            logger.error("No MQTT brokers connected after initial connection attempts")
+            logger.error("[MQTT] No brokers connected after initial connection attempts")
             return False
         
         return True
     
+    def _stop_websocket_ping_thread(self, broker_num):
+        """Cleanly stop the WebSocket ping thread for a broker"""
+        if broker_num in self.ws_ping_threads:
+            self.ws_ping_threads[broker_num]['active'] = False
+            # Give thread a moment to exit cleanly
+            time.sleep(0.1)
+            # Remove from dict to prevent memory leak
+            del self.ws_ping_threads[broker_num]
+            logger.debug(f"[MQTT{broker_num}] Stopped WebSocket ping thread")
+    
     def reconnect_disconnected_brokers(self):
-        """Check and reconnect any disconnected brokers with exponential backoff"""
+        """
+        Check for disconnected brokers and recreate them.
+        Simple: throw away old client, create fresh one.
+        Exit after max_reconnect_attempts consecutive failures per broker.
+        """
         current_time = time.time()
         
         for i, mqtt_info in enumerate(self.mqtt_clients):
@@ -667,62 +1088,56 @@ class MeshCoreBridge:
             if mqtt_info.get('connected', False):
                 continue
             
+            # Skip if currently connecting (but only if it's been < 10 seconds)
+            connecting_since = mqtt_info.get('connecting_since', 0)
+            if connecting_since > 0 and (current_time - connecting_since) < 10:
+                continue
+            
             # Check if it's time to attempt reconnect
             if current_time < mqtt_info.get('reconnect_at', 0):
                 continue
             
             broker_num = mqtt_info['broker_num']
+            failed_attempts = mqtt_info.get('failed_attempts', 0)
             
-            # Check if using auth tokens and if token is expired or close to expiring
-            use_auth_token = self.get_env_bool(f"MQTT{broker_num}_USE_AUTH_TOKEN", False)
-            if use_auth_token and broker_num in self.token_cache:
-                cached_token, created_at = self.token_cache[broker_num]
-                token_age = current_time - created_at
-                if token_age > (self.token_ttl - 300):
-                    logger.warning(f"MQTT{broker_num}: Token expired or near expiry (age: {token_age:.0f}s), recreating client")
-                    
-                    try:
-                        # Stop the old client
-                        old_client = mqtt_info['client']
-                        try:
-                            old_client.loop_stop()
-                            old_client.disconnect()
-                        except:
-                            pass
-                        
-                        # Clear cached token
-                        del self.token_cache[broker_num]
-                        
-                        # Create new client with fresh token
-                        new_client_info = self.connect_mqtt_broker(broker_num)
-                        if new_client_info:
-                            self.mqtt_clients[i] = new_client_info
-                            logger.info(f"MQTT{broker_num}: Successfully recreated client with fresh token")
-                        else:
-                            logger.error(f"MQTT{broker_num}: Failed to recreate client")
-                            mqtt_info['reconnect_at'] = current_time + self.reconnect_delay
-                            self.reconnect_delay = min(self.reconnect_delay * self.reconnect_backoff, self.max_reconnect_delay)
-                    except Exception as e:
-                        logger.error(f"MQTT{broker_num}: Error recreating client: {e}")
-                        mqtt_info['reconnect_at'] = current_time + self.reconnect_delay
-                        self.reconnect_delay = min(self.reconnect_delay * self.reconnect_backoff, self.max_reconnect_delay)
-                    
-                    continue
+            # Exit if too many failures
+            if failed_attempts >= self.max_reconnect_attempts:
+                logger.critical(f"[MQTT{broker_num}] {self.max_reconnect_attempts} consecutive failures - exiting for service restart")
+                sys.exit(1)
             
-            # Normal reconnect attempt
-            try:
-                logger.info(f"Attempting to reconnect MQTT{broker_num}... (delay was {self.reconnect_delay:.1f}s)")
-                mqtt_info['client'].reconnect()
-                
-                # Update reconnect timing with exponential backoff
+            logger.info(f"[MQTT{broker_num}] Reconnecting (attempt #{failed_attempts + 1})")
+            
+            # Stop old client cleanly
+            old_client = mqtt_info.get('client')
+            if old_client:
+                try:
+                    # Stop WebSocket ping thread cleanly
+                    self._stop_websocket_ping_thread(broker_num)
+                    # Stop paho loop and disconnect
+                    old_client.loop_stop()
+                    old_client.disconnect()
+                except Exception as e:
+                    logger.debug(f"[MQTT{broker_num}] Error stopping old client: {e}")
+            
+            # Clear token cache to force fresh token
+            if broker_num in self.token_cache:
+                del self.token_cache[broker_num]
+            
+            # Create fresh client
+            new_client_info = self.create_and_connect_broker(broker_num)
+            
+            if new_client_info:
+                # Success - replace old client
+                self.mqtt_clients[i] = new_client_info
+                logger.debug(f"[MQTT{broker_num}] Recreated client successfully")
+            else:
+                # Failure - increment counter and schedule retry
+                mqtt_info['failed_attempts'] = failed_attempts + 1
+                jitter = random.uniform(-0.5, 0.5)
+                delay = max(0, self.reconnect_delay + jitter)
+                mqtt_info['reconnect_at'] = current_time + delay
                 self.reconnect_delay = min(self.reconnect_delay * self.reconnect_backoff, self.max_reconnect_delay)
-                mqtt_info['reconnect_at'] = current_time + self.reconnect_delay
-                
-            except Exception as e:
-                logger.warning(f"Reconnect attempt failed for MQTT{broker_num}: {e}")
-                # Update reconnect timing with exponential backoff
-                self.reconnect_delay = min(self.reconnect_delay * self.reconnect_backoff, self.max_reconnect_delay)
-                mqtt_info['reconnect_at'] = current_time + self.reconnect_delay
+                logger.warning(f"[MQTT{broker_num}] Failed to recreate client (attempt #{failed_attempts + 1}/{self.max_reconnect_attempts})")
         
     def parse_and_publish(self, line):
         if not line:
@@ -738,7 +1153,10 @@ class MeshCoreBridge:
         if "U RAW:" in line:
             parts = line.split("U RAW:")
             if len(parts) > 1:
-                self.last_raw = parts[1].strip()
+                raw_hex = parts[1].strip()
+                self.last_raw = raw_hex
+                # Count actual bytes (hex string is 2x the actual byte count)
+                self.stats['bytes_processed'] += len(raw_hex) // 2
 
         # Handle DEBUG messages
         if self.debug:
@@ -755,10 +1173,18 @@ class MeshCoreBridge:
         # Handle Packet messages (RX and TX)
         packet_match = PACKET_PATTERN.match(line)
         if packet_match:
+            direction = packet_match.group(3).lower()  # rx or tx
+            
+            # Update packet counters
+            if direction == "rx":
+                self.stats['packets_rx'] += 1
+            else:
+                self.stats['packets_tx'] += 1
+            
             packet_type = packet_match.group(5)
             payload = {
                 "type": "PACKET",
-                "direction": packet_match.group(3).lower(),  # rx or tx
+                "direction": direction,
                 "time": packet_match.group(1),
                 "date": packet_match.group(2),
                 "len": packet_match.group(4),
@@ -769,7 +1195,7 @@ class MeshCoreBridge:
             }
 
             # Add SNR, RSSI, score, and hash for RX packets
-            if packet_match.group(3).lower() == "rx":
+            if direction == "rx":
                 payload.update({
                     "SNR": packet_match.group(8),
                     "RSSI": packet_match.group(9),
@@ -789,6 +1215,8 @@ class MeshCoreBridge:
             return
 
     def run(self):
+        log_config_sources()
+        
         if not self.connect_serial():
             return
 
@@ -821,6 +1249,15 @@ class MeshCoreBridge:
         if not self.model:
             logger.warning("Failed to get board type - will continue without it")
         
+        # Get initial device stats
+        device_stats = self.get_device_stats()
+        if device_stats:
+            self.stats['device'] = device_stats
+            self.stats['device_prev'] = device_stats.copy()
+            logger.info(f"Device stats: {device_stats}")
+        else:
+            logger.debug("Device stats not available (firmware may not support stats commands)")
+        
         # Log client version
         logger.info(f"Client version: {self.client_version}")
         
@@ -833,12 +1270,21 @@ class MeshCoreBridge:
             else:
                 retry_count += 1
                 wait_time = min(retry_count * 2, 30)  # Max 30 seconds between initial retries
-                logger.warning(f"Initial MQTT connection failed. Retrying in {wait_time}s... (attempt {retry_count}/{max_initial_retries})")
+                logger.warning(f"[MQTT] Initial connection failed. Retrying in {wait_time}s... (attempt {retry_count}/{max_initial_retries})")
                 sleep(wait_time)
         
         if retry_count >= max_initial_retries:
-            logger.error("Failed to establish initial MQTT connection after maximum retries")
-            return
+            logger.error("[MQTT] Failed to establish initial connection after maximum retries")
+            sys.exit(1)
+        
+        # Start stats logging thread
+        stats_thread = threading.Thread(
+            target=self._stats_logging_loop,
+            daemon=True,
+            name="Stats-Logger"
+        )
+        stats_thread.start()
+        logger.debug("[STATS] Started statistics logging thread")
         
         try:
             while True:
@@ -849,11 +1295,12 @@ class MeshCoreBridge:
                 self.reconnect_disconnected_brokers()
                 
                 try:
-                    # Check for serial data
-                    if self.ser.in_waiting > 0:
-                        line = self.ser.readline().decode(errors='replace').strip()
-                        logger.debug(f"RX: {line}")
-                        self.parse_and_publish(line)
+                    # Check for serial data (with lock for thread safety)
+                    with self.ser_lock:
+                        if self.ser.in_waiting > 0:
+                            line = self.ser.readline().decode(errors='replace').strip()
+                            logger.debug(f"RX: {line}")
+                            self.parse_and_publish(line)
                 except OSError:
                    logger.warning("Serial connection unavailable, trying to reconnect")
                    self.connect_serial()

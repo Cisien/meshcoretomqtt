@@ -4,7 +4,7 @@
 # ============================================================================
 set -e
 
-SCRIPT_VERSION="1.0.5"
+SCRIPT_VERSION="1.0.6"
 DEFAULT_REPO="Cisien/meshcoretomqtt"
 DEFAULT_BRANCH="main"
 
@@ -153,6 +153,247 @@ prompt_iata() {
     done
     
     echo "$iata"
+}
+
+# Validate and normalize MeshCore public key
+validate_meshcore_pubkey() {
+    local key="$1"
+    
+    # Remove spaces and convert to uppercase
+    key=$(echo "$key" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+    
+    # Check if it's exactly 64 hex characters (32 bytes)
+    if [ ${#key} -ne 64 ]; then
+        return 1
+    fi
+    
+    # Verify it's valid hex
+    if ! echo "$key" | grep -qE '^[0-9A-F]{64}$'; then
+        return 1
+    fi
+    
+    echo "$key"
+    return 0
+}
+
+# Validate email format and normalize to lowercase
+validate_email() {
+    local email="$1"
+    
+    # Basic sanity checks - must contain @ and at least one dot after @
+    if [[ ! "$email" =~ @ ]] || [[ ! "$email" =~ @.*\. ]]; then
+        return 1
+    fi
+    
+    # Check for basic invalid patterns
+    # - Must not start or end with @ or .
+    # - Must not have consecutive dots
+    # - Must not have spaces
+    if [[ "$email" =~ ^[.@] ]] || [[ "$email" =~ [.@]$ ]] || [[ "$email" =~ \.\. ]] || [[ "$email" =~ [[:space:]] ]]; then
+        return 1
+    fi
+    
+    # Must have at least one character before @
+    # Must have at least one character between @ and last dot
+    # Must have at least 2 characters after last dot (TLD)
+    local local_part="${email%%@*}"
+    local domain="${email#*@}"
+    
+    if [ ${#local_part} -lt 1 ] || [ ${#domain} -lt 3 ]; then
+        return 1
+    fi
+    
+    # Domain must have at least one dot and valid TLD
+    if [[ ! "$domain" =~ \. ]]; then
+        return 1
+    fi
+    
+    # Normalize to lowercase
+    echo "$email" | tr '[:upper:]' '[:lower:]'
+    return 0
+}
+
+# Prompt for owner email with validation
+prompt_owner_email() {
+    local existing="$1"
+    local email=""
+    local validated=""
+    
+    echo "" >&2
+    print_info "Owner email" >&2
+    echo "" >&2
+    
+    while true; do
+        email=$(prompt_input "Enter owner email (or leave empty to skip)" "${existing:-}")
+        
+        # Allow empty (skip)
+        if [ -z "$email" ]; then
+            echo ""
+            return 0
+        fi
+        
+        # Validate and normalize
+        validated=$(validate_email "$email")
+        if [ $? -eq 0 ]; then
+            echo "$validated"
+            return 0
+        else
+            print_error "Invalid email format"
+            if ! prompt_yes_no "Try again?" "y"; then
+                echo ""
+                return 0
+            fi
+        fi
+    done
+}
+
+# Prompt for owner public key with validation
+prompt_owner_pubkey() {
+    local existing="$1"
+    local owner=""
+    local validated=""
+    
+    echo "" >&2
+    print_info "Owner public key is a 64-character hex string (MeshCore public key)" >&2
+    print_info "Example: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" >&2
+    echo "" >&2
+    
+    while true; do
+        owner=$(prompt_input "Enter owner public key (or leave empty to skip)" "${existing:-}")
+        
+        # Allow empty (skip)
+        if [ -z "$owner" ]; then
+            echo ""
+            return 0
+        fi
+        
+        # Validate and normalize
+        validated=$(validate_meshcore_pubkey "$owner")
+        if [ $? -eq 0 ]; then
+            echo "$validated"
+            return 0
+        else
+            print_error "Invalid public key format. Must be 64 hex characters (32 bytes)"
+            if ! prompt_yes_no "Try again?" "y"; then
+                echo ""
+                return 0
+            fi
+        fi
+    done
+}
+
+# Update owner public key and email for existing brokers using auth tokens
+update_owner_info() {
+    ENV_LOCAL="$INSTALL_DIR/.env.local"
+    
+    if [ ! -f "$ENV_LOCAL" ]; then
+        print_error "No configuration file found"
+        return 1
+    fi
+    
+    # Find all brokers using auth tokens
+    local auth_token_brokers=()
+    for broker_num in {1..4}; do
+        if grep -q "^MCTOMQTT_MQTT${broker_num}_USE_AUTH_TOKEN=true" "$ENV_LOCAL" 2>/dev/null; then
+            auth_token_brokers+=($broker_num)
+        fi
+    done
+    
+    if [ ${#auth_token_brokers[@]} -eq 0 ]; then
+        print_warning "No brokers configured with auth token authentication"
+        return 0
+    fi
+    
+    echo ""
+    print_header "Update Owner Information"
+    print_info "Found ${#auth_token_brokers[@]} broker(s) using auth token authentication:"
+    echo ""
+    print_info "Current configuration:"
+    for broker_num in "${auth_token_brokers[@]}"; do
+        local server=$(grep "^MCTOMQTT_MQTT${broker_num}_SERVER=" "$ENV_LOCAL" 2>/dev/null | cut -d'=' -f2)
+        local existing_owner=$(grep "^MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=" "$ENV_LOCAL" 2>/dev/null | cut -d'=' -f2)
+        local existing_email=$(grep "^MCTOMQTT_MQTT${broker_num}_TOKEN_EMAIL=" "$ENV_LOCAL" 2>/dev/null | cut -d'=' -f2)
+        echo "  MQTT${broker_num} ($server):"
+        if [ -n "$existing_owner" ]; then
+            echo "    Owner: $existing_owner"
+        else
+            echo "    Owner: (not set)"
+        fi
+        if [ -n "$existing_email" ]; then
+            echo "    Email: $existing_email"
+        else
+            echo "    Email: (not set)"
+        fi
+    done
+    echo ""
+    
+    # Get first existing owner and email or empty
+    local first_existing_owner=$(grep "^MCTOMQTT_MQTT[0-9]_TOKEN_OWNER=" "$ENV_LOCAL" 2>/dev/null | head -1 | cut -d'=' -f2)
+    local first_existing_email=$(grep "^MCTOMQTT_MQTT[0-9]_TOKEN_EMAIL=" "$ENV_LOCAL" 2>/dev/null | head -1 | cut -d'=' -f2)
+    
+    # Prompt for new owner
+    local new_owner=$(prompt_owner_pubkey "$first_existing_owner")
+    
+    # Prompt for new email
+    local new_email=$(prompt_owner_email "$first_existing_email")
+    
+    # Back up config
+    cp "$ENV_LOCAL" "$ENV_LOCAL.backup-$(date +%Y%m%d-%H%M%S)"
+    
+    # Update all auth token brokers
+    for broker_num in "${auth_token_brokers[@]}"; do
+        # Remove existing owner line if present
+        if grep -q "^MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=" "$ENV_LOCAL"; then
+            sed -i.tmp "/^MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=/d" "$ENV_LOCAL" && rm -f "$ENV_LOCAL.tmp"
+        fi
+        
+        # Remove existing email line if present
+        if grep -q "^MCTOMQTT_MQTT${broker_num}_TOKEN_EMAIL=" "$ENV_LOCAL"; then
+            sed -i.tmp "/^MCTOMQTT_MQTT${broker_num}_TOKEN_EMAIL=/d" "$ENV_LOCAL" && rm -f "$ENV_LOCAL.tmp"
+        fi
+        
+        # Add new owner if provided
+        if [ -n "$new_owner" ]; then
+            # Find the line with TOKEN_AUDIENCE or USE_AUTH_TOKEN and add owner after it
+            if grep -q "^MCTOMQTT_MQTT${broker_num}_TOKEN_AUDIENCE=" "$ENV_LOCAL"; then
+                sed -i.tmp "/^MCTOMQTT_MQTT${broker_num}_TOKEN_AUDIENCE=/a\\
+MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=$new_owner" "$ENV_LOCAL" && rm -f "$ENV_LOCAL.tmp"
+            else
+                sed -i.tmp "/^MCTOMQTT_MQTT${broker_num}_USE_AUTH_TOKEN=/a\\
+MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=$new_owner" "$ENV_LOCAL" && rm -f "$ENV_LOCAL.tmp"
+            fi
+        fi
+        
+        # Add new email if provided
+        if [ -n "$new_email" ]; then
+            # Find the line with TOKEN_OWNER or TOKEN_AUDIENCE or USE_AUTH_TOKEN and add email after it
+            if grep -q "^MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=" "$ENV_LOCAL"; then
+                sed -i.tmp "/^MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=/a\\
+MCTOMQTT_MQTT${broker_num}_TOKEN_EMAIL=$new_email" "$ENV_LOCAL" && rm -f "$ENV_LOCAL.tmp"
+            elif grep -q "^MCTOMQTT_MQTT${broker_num}_TOKEN_AUDIENCE=" "$ENV_LOCAL"; then
+                sed -i.tmp "/^MCTOMQTT_MQTT${broker_num}_TOKEN_AUDIENCE=/a\\
+MCTOMQTT_MQTT${broker_num}_TOKEN_EMAIL=$new_email" "$ENV_LOCAL" && rm -f "$ENV_LOCAL.tmp"
+            else
+                sed -i.tmp "/^MCTOMQTT_MQTT${broker_num}_USE_AUTH_TOKEN=/a\\
+MCTOMQTT_MQTT${broker_num}_TOKEN_EMAIL=$new_email" "$ENV_LOCAL" && rm -f "$ENV_LOCAL.tmp"
+            fi
+        fi
+    done
+    
+    # Display summary
+    local changes=()
+    if [ -n "$new_owner" ]; then
+        changes+=("owner: $new_owner")
+    fi
+    if [ -n "$new_email" ]; then
+        changes+=("email: $new_email")
+    fi
+    
+    if [ ${#changes[@]} -gt 0 ]; then
+        print_success "Updated ${#auth_token_brokers[@]} broker(s) with ${changes[*]}"
+    else
+        print_success "No changes made"
+    fi
 }
 
 # Detect available serial devices
@@ -342,6 +583,14 @@ EOF
     
     if [ "$DECODER_AVAILABLE" = true ]; then
         if prompt_yes_no "Enable LetsMesh Packet Analyzer MQTT servers?" "y"; then
+            # Prompt for owner public key and email once for LetsMesh brokers
+            echo ""
+            print_info "LetsMesh Packet Analyzer supports optional owner identification"
+            print_info "This links your observer to your MeshCore public key and email"
+            OWNER_PUBKEY=$(prompt_owner_pubkey "")
+            OWNER_EMAIL=$(prompt_owner_email "")
+            
+            # Configure MQTT1 (US)
             cat >> "$ENV_LOCAL" << EOF
 
 # MQTT Broker 1 - LetsMesh.net Packet Analyzer (US)
@@ -352,6 +601,17 @@ MCTOMQTT_MQTT1_TRANSPORT=websockets
 MCTOMQTT_MQTT1_USE_TLS=true
 MCTOMQTT_MQTT1_USE_AUTH_TOKEN=true
 MCTOMQTT_MQTT1_TOKEN_AUDIENCE=mqtt-us-v1.letsmesh.net
+EOF
+            
+            if [ -n "$OWNER_PUBKEY" ]; then
+                echo "MCTOMQTT_MQTT1_TOKEN_OWNER=$OWNER_PUBKEY" >> "$ENV_LOCAL"
+            fi
+            if [ -n "$OWNER_EMAIL" ]; then
+                echo "MCTOMQTT_MQTT1_TOKEN_EMAIL=$OWNER_EMAIL" >> "$ENV_LOCAL"
+            fi
+            
+            # Configure MQTT2 (EU)
+            cat >> "$ENV_LOCAL" << EOF
 
 # MQTT Broker 2 - LetsMesh.net Packet Analyzer (EU)
 MCTOMQTT_MQTT2_ENABLED=true
@@ -362,7 +622,24 @@ MCTOMQTT_MQTT2_USE_TLS=true
 MCTOMQTT_MQTT2_USE_AUTH_TOKEN=true
 MCTOMQTT_MQTT2_TOKEN_AUDIENCE=mqtt-eu-v1.letsmesh.net
 EOF
-            print_success "LetsMesh Packet Analyzer MQTT servers enabled: mqtt-us-v1.letsmesh.net, mqtt-eu-v1.letsmesh.net"
+            
+            if [ -n "$OWNER_PUBKEY" ]; then
+                echo "MCTOMQTT_MQTT2_TOKEN_OWNER=$OWNER_PUBKEY" >> "$ENV_LOCAL"
+            fi
+            if [ -n "$OWNER_EMAIL" ]; then
+                echo "MCTOMQTT_MQTT2_TOKEN_EMAIL=$OWNER_EMAIL" >> "$ENV_LOCAL"
+            fi
+            
+            # Build success message
+            local owner_info=""
+            if [ -n "$OWNER_PUBKEY" ] && [ -n "$OWNER_EMAIL" ]; then
+                owner_info=" with owner: $OWNER_PUBKEY ($OWNER_EMAIL)"
+            elif [ -n "$OWNER_PUBKEY" ]; then
+                owner_info=" with owner: $OWNER_PUBKEY"
+            elif [ -n "$OWNER_EMAIL" ]; then
+                owner_info=" with email: $OWNER_EMAIL"
+            fi
+            print_success "LetsMesh Packet Analyzer MQTT servers enabled${owner_info}"
             
             if prompt_yes_no "Would you like to configure additional MQTT brokers?" "n"; then
                 configure_additional_brokers
@@ -464,6 +741,27 @@ configure_custom_broker() {
             TOKEN_AUDIENCE=$(prompt_input "Token audience (optional)" "")
             if [ -n "$TOKEN_AUDIENCE" ]; then
                 echo "MCTOMQTT_MQTT${BROKER_NUM}_TOKEN_AUDIENCE=$TOKEN_AUDIENCE" >> "$ENV_LOCAL"
+            fi
+            
+            # Prompt for owner public key
+            OWNER_PUBKEY=$(prompt_owner_pubkey "")
+            if [ -n "$OWNER_PUBKEY" ]; then
+                echo "MCTOMQTT_MQTT${BROKER_NUM}_TOKEN_OWNER=$OWNER_PUBKEY" >> "$ENV_LOCAL"
+            fi
+            
+            # Prompt for owner email
+            OWNER_EMAIL=$(prompt_owner_email "")
+            if [ -n "$OWNER_EMAIL" ]; then
+                echo "MCTOMQTT_MQTT${BROKER_NUM}_TOKEN_EMAIL=$OWNER_EMAIL" >> "$ENV_LOCAL"
+            fi
+            
+            # Build success message
+            if [ -n "$OWNER_PUBKEY" ] && [ -n "$OWNER_EMAIL" ]; then
+                print_success "Owner info set: $OWNER_PUBKEY ($OWNER_EMAIL)"
+            elif [ -n "$OWNER_PUBKEY" ]; then
+                print_success "Owner public key set: $OWNER_PUBKEY"
+            elif [ -n "$OWNER_EMAIL" ]; then
+                print_success "Owner email set: $OWNER_EMAIL"
             fi
         fi
     fi
@@ -853,6 +1151,41 @@ main() {
             configure_mqtt_brokers
         else
             print_info "Keeping existing configuration"
+            
+            # Check for auth token brokers and show current owner info
+            local auth_token_brokers=()
+            for broker_num in {1..4}; do
+                if grep -q "^MCTOMQTT_MQTT${broker_num}_USE_AUTH_TOKEN=true" "$INSTALL_DIR/.env.local" 2>/dev/null; then
+                    auth_token_brokers+=($broker_num)
+                fi
+            done
+            
+            if [ ${#auth_token_brokers[@]} -gt 0 ]; then
+                echo ""
+                print_info "Current owner information for auth token brokers:"
+                for broker_num in "${auth_token_brokers[@]}"; do
+                    local server=$(grep "^MCTOMQTT_MQTT${broker_num}_SERVER=" "$INSTALL_DIR/.env.local" 2>/dev/null | cut -d'=' -f2)
+                    local existing_owner=$(grep "^MCTOMQTT_MQTT${broker_num}_TOKEN_OWNER=" "$INSTALL_DIR/.env.local" 2>/dev/null | cut -d'=' -f2)
+                    local existing_email=$(grep "^MCTOMQTT_MQTT${broker_num}_TOKEN_EMAIL=" "$INSTALL_DIR/.env.local" 2>/dev/null | cut -d'=' -f2)
+                    echo "  MQTT${broker_num} ($server):"
+                    if [ -n "$existing_owner" ]; then
+                        echo "    Owner: $existing_owner"
+                    else
+                        echo "    Owner: (not set)"
+                    fi
+                    if [ -n "$existing_email" ]; then
+                        echo "    Email: $existing_email"
+                    else
+                        echo "    Email: (not set)"
+                    fi
+                done
+                echo ""
+                
+                # Offer to update owner information
+                if prompt_yes_no "Update owner information for auth token brokers?" "n"; then
+                    update_owner_info
+                fi
+            fi
         fi
     elif [ ! -f "$INSTALL_DIR/.env.local" ]; then
         configure_mqtt_brokers
@@ -1074,6 +1407,28 @@ install_service() {
 install_systemd_service() {
     print_info "Installing systemd service..."
     
+    # Check if service already exists (update scenario)
+    local service_exists=false
+    local service_was_enabled=false
+    local service_was_running=false
+    
+    if [ -f /etc/systemd/system/mctomqtt.service ]; then
+        service_exists=true
+        print_info "Existing service detected - will update"
+        
+        # Check if service was enabled
+        if sudo systemctl is-enabled mctomqtt.service &>/dev/null; then
+            service_was_enabled=true
+        fi
+        
+        # Check if service was running
+        if sudo systemctl is-active mctomqtt.service &>/dev/null; then
+            service_was_running=true
+            print_info "Stopping running service..."
+            sudo systemctl stop mctomqtt.service
+        fi
+    fi
+    
     local service_file="/tmp/mctomqtt.service"
     local current_user=$(whoami)
     
@@ -1096,7 +1451,7 @@ WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$service_path"
 ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/mctomqtt.py
 KillMode=process
-Restart=on-failure
+Restart=always
 RestartSec=10
 Type=exec
 
@@ -1109,18 +1464,36 @@ EOF
     if sudo cp "$service_file" /etc/systemd/system/mctomqtt.service; then
         sudo systemctl daemon-reload
         
-        if prompt_yes_no "Enable service to start on boot?" "y"; then
-            sudo systemctl enable mctomqtt.service
-            print_success "Service enabled"
-        fi
-        
-        if prompt_yes_no "Start service now?" "y"; then
-            sudo systemctl start mctomqtt.service
-            check_service_health "systemd"
+        # If updating, preserve previous state
+        if [ "$service_exists" = true ]; then
+            if [ "$service_was_enabled" = true ]; then
+                sudo systemctl enable mctomqtt.service
+                print_success "Service re-enabled"
+            fi
+            
+            if [ "$service_was_running" = true ]; then
+                print_info "Restarting service..."
+                sudo systemctl start mctomqtt.service
+                check_service_health "systemd"
+            fi
+            
+            print_success "Systemd service updated"
+        else
+            # New installation - prompt user
+            if prompt_yes_no "Enable service to start on boot?" "y"; then
+                sudo systemctl enable mctomqtt.service
+                print_success "Service enabled"
+            fi
+            
+            if prompt_yes_no "Start service now?" "y"; then
+                sudo systemctl start mctomqtt.service
+                check_service_health "systemd"
+            fi
+            
+            print_success "Systemd service installed"
         fi
         
         SERVICE_INSTALLED=true
-        print_success "Systemd service installed"
         
         # Save installation type marker
         echo "systemd" > "$INSTALL_DIR/.install_type"

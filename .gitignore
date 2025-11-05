@@ -7,3 +7,4 @@ mctomqtt.service
 *.log
 output.log
 venv/
+.DS_Store
