@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import grp
 import json
 import serial
 import threading
@@ -1243,6 +1244,17 @@ class MeshCoreBridge:
         self.should_exit = True
 
     def wait_for_system_time_sync(self):
+        groups = []
+        for gid in os.getgroups():
+            try:
+                groups.append(grp.getgrgid(gid).gr_name)
+            except KeyError:  # normal for systemd DynamicUser
+                pass
+        if 'adm' not in groups and 'systemd-journal' not in groups:
+            logger.warning(
+                    "Not a member of adm or systemd-journal, can't"
+                    " check if system clock is synchronized")
+            return
         while True:
             result = subprocess.run(
                 ['journalctl', '-u', 'systemd-timesyncd'],
