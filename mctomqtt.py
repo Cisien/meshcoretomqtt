@@ -1206,22 +1206,35 @@ class MeshCoreBridge:
             clients_to_publish = self.mqtt_clients
         
         for mqtt_client_info in clients_to_publish:
-            broker_num = mqtt_client_info['broker_num']
+            current_broker_num = mqtt_client_info['broker_num']
+            
+            # Attempt to derive the topic type from the topic string suffix
+            # If the topic matches a known type, check if this specific broker has an override configured
+            actual_topic = topic
+            for suffix, topic_type in [("/status", "status"), ("/packets", "packets"), ("/debug", "debug"), ("/raw", "raw")]:
+                if topic.endswith(suffix):
+                    # Check for specific override for this broker
+                    override = self.get_topic(topic_type, current_broker_num)
+                    # If an override exists and is different from the global topic, use it
+                    if override and override != topic:
+                        actual_topic = override
+                    break
+
             try:
                 mqtt_client = mqtt_client_info['client']
-                qos = self.get_env_int(f"MQTT{broker_num}_QOS", 0)
+                qos = self.get_env_int(f"MQTT{current_broker_num}_QOS", 0)
                 if qos == 1:
                     qos = 0  # force qos=1 to 0 because qos 1 can cause retry storms
                 
-                result = mqtt_client.publish(topic, payload, qos=qos, retain=retain)
+                result = mqtt_client.publish(actual_topic, payload, qos=qos, retain=retain)
                 if result.rc != mqtt.MQTT_ERR_SUCCESS:
-                    logger.error(f"[MQTT{broker_num}] Publish failed to {topic}: {mqtt.error_string(result.rc)}")
+                    logger.error(f"[MQTT{current_broker_num}] Publish failed to {actual_topic}: {mqtt.error_string(result.rc)}")
                     self.stats['publish_failures'] += 1
                 else:
-                    logger.debug(f"[MQTT{broker_num}] Published to {topic}")
+                    logger.debug(f"[MQTT{current_broker_num}] Published to {actual_topic}")
                     success = True
             except Exception as e:
-                logger.error(f"[MQTT{broker_num}] Publish error to {topic}: {str(e)}")
+                logger.error(f"[MQTT{current_broker_num}] Publish error to {actual_topic}: {str(e)}")
                 self.stats['publish_failures'] += 1
         
         return success
