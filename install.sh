@@ -1574,23 +1574,27 @@ main() {
                     # Detect docker command
                     DOCKER=$(docker_cmd) || DOCKER="docker"
                     
-                    # Download latest Dockerfile
-                    print_info "Downloading latest Dockerfile..."
-                    BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
-                    if ! curl -fsSL "$BASE_URL/Dockerfile" -o "$INSTALL_DIR/Dockerfile"; then
-                        print_error "Failed to download Dockerfile"
-                    fi
+                    # Try to pull image from registry first
+                    DOCKER_IMAGE="ghcr.io/Cisien/meshcoretomqtt:latest"
+                    LOCAL_IMAGE="mctomqtt:latest"
                     
-                    # Rebuild Docker image
-                    print_info "Rebuilding Docker image..."
-                    if [ -f "$INSTALL_DIR/Dockerfile" ]; then
-                        echo ""
-                        if $DOCKER build -t mctomqtt:latest "$INSTALL_DIR"; then
-                            print_success "Docker image rebuilt"
+                    print_info "Attempting to pull image from registry..."
+                    if $DOCKER pull "$DOCKER_IMAGE" 2>/dev/null; then
+                        print_success "Image pulled successfully from registry"
+                        # Tag it for easier use
+                        $DOCKER tag "$DOCKER_IMAGE" "$LOCAL_IMAGE" 2>/dev/null || true
+                        DOCKER_IMAGE_TO_USE="$LOCAL_IMAGE"
+                    else
+                        print_warning "Failed to pull image from registry (network issue or image not available)"
+                        print_info "Falling back to local build..."
+                        
+                        # Build locally
+                        if build_docker_image_local "$DOCKER" "$LOCAL_IMAGE"; then
+                            DOCKER_IMAGE_TO_USE="$LOCAL_IMAGE"
                         else
-                            print_error "Failed to rebuild Docker image"
+                            print_error "Failed to build Docker image locally"
+                            return 1
                         fi
-                        echo ""
                     fi
                     
                     # Restart container
@@ -1606,7 +1610,7 @@ main() {
                         if [ -e "$SERIAL_DEVICE" ]; then
                             DOCKER_RUN_CMD="$DOCKER_RUN_CMD --device=$SERIAL_DEVICE"
                         fi
-                        DOCKER_RUN_CMD="$DOCKER_RUN_CMD mctomqtt:latest"
+                        DOCKER_RUN_CMD="$DOCKER_RUN_CMD $DOCKER_IMAGE_TO_USE"
                         
                         if eval "$DOCKER_RUN_CMD"; then
                             check_service_health "docker"
@@ -1919,6 +1923,44 @@ EOF
     print_success "Launchd service installed"
 }
 
+# Build Docker image locally
+build_docker_image_local() {
+    local DOCKER="$1"
+    local IMAGE_NAME="$2"
+    
+    print_info "Building Docker image locally..."
+    
+    # Ensure Dockerfile exists
+    if [ ! -f "$INSTALL_DIR/Dockerfile" ]; then
+        print_info "Downloading Dockerfile..."
+        BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
+        if ! curl -fsSL "$BASE_URL/Dockerfile" -o "$INSTALL_DIR/Dockerfile"; then
+            print_error "Failed to download Dockerfile"
+            return 1
+        fi
+    fi
+    
+    # Copy application files to build context
+    print_info "Preparing build context..."
+    local BUILD_DIR=$(mktemp -d)
+    cp "$INSTALL_DIR/Dockerfile" "$BUILD_DIR/"
+    cp "$INSTALL_DIR/mctomqtt.py" "$BUILD_DIR/"
+    cp "$INSTALL_DIR/auth_token.py" "$BUILD_DIR/"
+    cp "$INSTALL_DIR/.env" "$BUILD_DIR/"
+    
+    # Build image
+    print_info "Building image: $IMAGE_NAME"
+    if $DOCKER build -t "$IMAGE_NAME" "$BUILD_DIR"; then
+        print_success "Docker image built successfully"
+        rm -rf "$BUILD_DIR"
+        return 0
+    else
+        print_error "Failed to build Docker image"
+        rm -rf "$BUILD_DIR"
+        return 1
+    fi
+}
+
 # Install Docker container
 install_docker() {
     print_info "Setting up Docker installation..."
@@ -1941,26 +1983,31 @@ install_docker() {
     print_success "Docker found: $($DOCKER --version)"
     
     # Build Docker image
-    print_header "Building Docker Image"
+    print_header "Docker Image Setup"
     
-    # Create Dockerfile in install directory if not present
-    if [ ! -f "$INSTALL_DIR/Dockerfile" ]; then
-        print_info "Downloading Dockerfile..."
-        BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
-        if ! curl -fsSL "$BASE_URL/Dockerfile" -o "$INSTALL_DIR/Dockerfile"; then
-            print_error "Failed to download Dockerfile"
+    # Try to pull image from registry first
+    DOCKER_IMAGE="ghcr.io/Cisien/meshcoretomqtt:latest"
+    LOCAL_IMAGE="mctomqtt:latest"
+    
+    print_info "Attempting to pull image from registry..."
+    if $DOCKER pull "$DOCKER_IMAGE" 2>/dev/null; then
+        print_success "Image pulled successfully from registry"
+        # Tag it for easier use
+        $DOCKER tag "$DOCKER_IMAGE" "$LOCAL_IMAGE" 2>/dev/null || true
+        DOCKER_IMAGE_TO_USE="$LOCAL_IMAGE"
+    else
+        print_warning "Failed to pull image from registry (network issue or image not available)"
+        print_info "Falling back to local build..."
+        
+        # Build locally
+        if build_docker_image_local "$DOCKER" "$LOCAL_IMAGE"; then
+            DOCKER_IMAGE_TO_USE="$LOCAL_IMAGE"
+        else
+            print_error "Failed to build Docker image locally"
             return 1
         fi
     fi
     
-    print_info "Building mctomqtt:latest image..."
-    echo ""
-    if $DOCKER build -t mctomqtt:latest "$INSTALL_DIR"; then
-        print_success "Docker image built successfully"
-    else
-        print_error "Failed to build Docker image"
-        return 1
-    fi
     echo ""
     
     # Get serial device from .env.local
@@ -1977,7 +2024,7 @@ install_docker() {
         print_warning "Serial device $SERIAL_DEVICE not found - container will start but may not connect"
     fi
     
-    DOCKER_RUN_CMD="$DOCKER_RUN_CMD mctomqtt:latest"
+    DOCKER_RUN_CMD="$DOCKER_RUN_CMD $DOCKER_IMAGE_TO_USE"
     
     echo ""
     print_info "Docker run command:"
