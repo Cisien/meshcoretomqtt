@@ -5,39 +5,41 @@
 #     --device=/dev/ttyACM0 \
 #     meshcoretomqtt:latest
 
-FROM debian:bookworm
 
-ENV DEBIAN_FRONTEND=noninteractive
+# Builder stage for Node.js and meshcore-decoder
+FROM alpine:latest AS builder
+
+WORKDIR /build
+
+# Install Node.js and npm
+RUN apk add --no-cache nodejs npm
+
+# Install meshcore-decoder
+RUN npm install -g @michaelhart/meshcore-decoder
+
+# Final stage
+FROM python:3.11-alpine
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /opt
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    python3-pip \
+# Install dependencies including Node.js runtime
+RUN apk add --no-cache \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    libstdc++ \
+    libgcc \
+    nodejs \
+    && pip3 install pyserial paho-mqtt --no-cache-dir
 
-# Install Python packages
-RUN pip install pyserial paho-mqtt --break-system-packages
-
-# Install Node.js via nvm and meshcore-decoder for auth token support
-ENV NVM_DIR=/root/.nvm
-ENV NODE_VERSION=lts/*
-
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
-    && . "$NVM_DIR/nvm.sh" \
-    && nvm install $NODE_VERSION \
-    && nvm use $NODE_VERSION \
-    && npm install -g @michaelhart/meshcore-decoder \
-    && ln -s "$NVM_DIR/versions/node/$(ls $NVM_DIR/versions/node | head -1)/bin/"* /usr/local/bin/
-
+# Copy the entire Node structure from builder to ensure symlinks and paths remain valid
+COPY --from=builder /usr/local /usr/local
 # Copy application files
-COPY ./mctomqtt.py /opt/
-COPY ./auth_token.py /opt/
-COPY ./.env /opt/
+COPY ./mctomqtt.py ./auth_token.py ./.env /opt/
 
 # Note: .env.local should be mounted as a volume with your configuration
 # The .env file contains defaults, .env.local contains your overrides
 # Example: -v /path/to/.env.local:/opt/.env.local
 
-CMD ["/usr/bin/python3", "/opt/mctomqtt.py"]
+CMD ["python3", "/opt/mctomqtt.py"]
