@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = "1.0.7.0"
+__version__ = "1.0.8.0"
 
 import sys
 import os
@@ -160,7 +160,7 @@ class MeshCoreBridge:
             'publish_failures': 0,
             'last_stats_log': time.time(),
             'reconnects': {},  # {broker_num: [timestamp1, timestamp2, ...]}
-            'device': {},  # Device stats from serial (battery, uptime, errors, etc.)
+            'device': {},  # Device stats from serial (battery, uptime, debug_flags, etc.)
             'device_prev': {}  # Previous device stats for delta calculation
         }
         
@@ -591,7 +591,7 @@ class MeshCoreBridge:
                     if 'uptime_secs' in core_stats:
                         stats['uptime_secs'] = core_stats['uptime_secs']
                     if 'errors' in core_stats:
-                        stats['errors'] = core_stats['errors']
+                        stats['debug_flags'] = core_stats['errors']
                     if 'queue_len' in core_stats:
                         stats['queue_len'] = core_stats['queue_len']
                 except (json.JSONDecodeError, ValueError) as e:
@@ -620,6 +620,26 @@ class MeshCoreBridge:
                         stats['rx_air_secs'] = radio_stats['rx_air_secs']
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.debug(f"Failed to parse stats-radio: {e}")
+            
+            # Get stats-packets: recv_errors
+            self.ser.flushInput()
+            self.ser.flushOutput()
+            self.ser.write(b"stats-packets\r\n")
+            logger.debug("Sent 'stats-packets' command")
+            
+            sleep(0.5)
+            response = self.ser.read_all().decode(errors='replace')
+            logger.debug(f"Raw stats-packets response: {response}")
+            
+            if "-> " in response and "Unknown command" not in response:
+                try:
+                    json_str = response.split("-> ", 1)[1].strip()
+                    json_str = json_str.split('\n')[0].replace('\r', '').strip()
+                    packets_stats = json.loads(json_str)
+                    if 'recv_errors' in packets_stats:
+                        stats['recv_errors'] = packets_stats['recv_errors']
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug(f"Failed to parse stats-packets: {e}")
         
         return stats
 
@@ -778,14 +798,22 @@ class MeshCoreBridge:
                         dev_uptime_str = f"{dev_uptime_minutes}m"
                     
                     parts.append(f"Uptime: {dev_uptime_str}")
-                
-                # Errors
-                if 'errors' in ds:
-                    parts.append(f"Errors: {ds['errors']}")
+
+                # Debug Flags
+                if 'debug_flags' in ds:
+                    parts.append(f"Debug Flags: {ds['debug_flags']}")
                 
                 # Queue
                 if 'queue_len' in ds:
                     parts.append(f"Queue: {ds['queue_len']}")
+                
+                # Errors per minute
+                if 'recv_errors' in ds:
+                    prev = self.stats.get('device_prev', {})
+                    prev_errors = prev.get('recv_errors', 0) if prev else 0
+                    errors_delta = ds['recv_errors'] - prev_errors
+                    errors_per_min = (errors_delta / time_elapsed) * 60 if time_elapsed > 0 else 0
+                    parts.append(f"Err/min (5m): {errors_per_min:.1f}")
                 
                 if parts:
                     logger.info(f"[DEVICE] {' | '.join(parts)}")
