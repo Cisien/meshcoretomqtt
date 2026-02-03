@@ -828,10 +828,6 @@ class MeshCoreBridge:
         broker_name = userdata.get('name', 'unknown') if userdata else 'unknown'
         broker_num = userdata.get('broker_num', None) if userdata else None
         
-        # Signal that this broker has completed its connection attempt
-        if broker_num in self.connection_events:
-            self.connection_events[broker_num].set()
-        
         if rc == 0:
             # Reset reconnect delay on successful connection
             self.reconnect_delay = 1.0
@@ -889,7 +885,10 @@ class MeshCoreBridge:
             self._subscribe_serial_commands(client, broker_num)
         else:
             logger.error(f"[MQTT{broker_num}] Connection failed with code: {rc}")
-
+        
+        # Signal that this broker has completed its connection attempt
+        if broker_num in self.connection_events:
+            self.connection_events[broker_num].set()
 
     def on_mqtt_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         broker_name = userdata.get('name', 'unknown') if userdata else 'unknown'
@@ -1349,9 +1348,8 @@ class MeshCoreBridge:
         
         # Connect
         try:
-            mqtt_client.connect(server, port, keepalive=keepalive)
-            mqtt_client.loop_start()
-            
+            mqtt_client.connect_async(server, port, keepalive=keepalive)
+
             # Start WebSocket ping thread if needed
             if transport == "websockets":
                 self.ws_ping_threads[broker_num] = {'active': True}
@@ -1403,6 +1401,7 @@ class MeshCoreBridge:
             client_info = self.create_and_connect_broker(broker_num)
             if client_info:
                 self.mqtt_clients.append(client_info)
+                client_info['client'].loop_start()
         
         if len(self.mqtt_clients) == 0:
             logger.error("[MQTT] Failed to connect to any broker")
