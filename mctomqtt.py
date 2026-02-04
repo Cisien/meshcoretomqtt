@@ -1488,6 +1488,7 @@ class MeshCoreBridge:
             if new_client_info:
                 # Success - replace old client
                 self.mqtt_clients[i] = new_client_info
+                new_client_info['client'].loop_start()
                 logger.debug(f"[MQTT{broker_num}] Recreated client successfully")
             else:
                 # Failure - increment counter and schedule retry
