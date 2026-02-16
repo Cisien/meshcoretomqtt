@@ -3,6 +3,8 @@
 Requires sudo access and systemd/launchd.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess
@@ -17,7 +19,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 
 @pytest.fixture()
-def install_dirs(tmp_path):
+def install_dirs(tmp_path: Path) -> tuple[Path, Path]:
     """Create temp install and config directories."""
     install_dir = tmp_path / "opt" / "mctomqtt"
     config_dir = tmp_path / "etc" / "mctomqtt"
@@ -28,7 +30,7 @@ def install_dirs(tmp_path):
 
 
 class TestInstallFlow:
-    def test_local_install_update_mode(self, install_dirs):
+    def test_local_install_update_mode(self, install_dirs: tuple[Path, Path]) -> None:
         """Run installer in update mode (non-interactive) with LOCAL_INSTALL."""
         install_dir, config_dir = install_dirs
 
@@ -54,7 +56,7 @@ class TestInstallFlow:
         # Even if it fails interactively, verify it at least started
         assert "installer" in result.stdout.lower() or result.returncode == 0 or "error" in result.stderr.lower()
 
-    def test_version_info_structure(self, tmp_path):
+    def test_version_info_structure(self, tmp_path: Path) -> None:
         """Verify .version_info JSON structure is valid."""
         from installer import InstallerContext
         from installer.system import create_version_info

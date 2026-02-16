@@ -3,6 +3,8 @@
 Requires an existing installation (from test_install_flow or a real one).
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import tomllib
@@ -16,7 +18,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 
 class TestUpdateFlow:
-    def test_update_preserves_user_toml(self, tmp_path):
+    def test_update_preserves_user_toml(self, tmp_path: Path) -> None:
         """Verify that 00-user.toml is preserved after update."""
         config_dir = tmp_path / "etc" / "mctomqtt"
         config_d = config_dir / "config.d"
@@ -37,7 +39,7 @@ class TestUpdateFlow:
         assert data["general"]["iata"] == "SEA"
         assert data["serial"]["ports"] == ["/dev/ttyACM0"]
 
-    def test_update_config_toml_valid(self, tmp_path):
+    def test_update_config_toml_valid(self, tmp_path: Path) -> None:
         """Verify config.toml from repo is valid TOML."""
         config_example = PROJECT_ROOT / "config.toml.example"
         if config_example.exists():

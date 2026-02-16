@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .ui import (
     print_error,
@@ -35,8 +35,8 @@ def run_cmd(
     check: bool = True,
     capture: bool = False,
     shell: bool = False,
-    **kwargs,
-) -> subprocess.CompletedProcess:
+    **kwargs: Any,
+) -> subprocess.CompletedProcess[str]:
     """Run a command, optionally capturing output."""
     return subprocess.run(
         cmd,

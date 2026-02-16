@@ -1,16 +1,17 @@
 """Output formatting, TTY prompts, and colors."""
+from __future__ import annotations
 
 import os
 import sys
 
 # ANSI color codes — disabled when stdout is not a TTY
-_USE_COLOR = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+_USE_COLOR: bool = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
-RED = "\033[0;31m" if _USE_COLOR else ""
-GREEN = "\033[0;32m" if _USE_COLOR else ""
-YELLOW = "\033[1;33m" if _USE_COLOR else ""
-BLUE = "\033[0;34m" if _USE_COLOR else ""
-NC = "\033[0m" if _USE_COLOR else ""
+RED: str = "\033[0;31m" if _USE_COLOR else ""
+GREEN: str = "\033[0;32m" if _USE_COLOR else ""
+YELLOW: str = "\033[1;33m" if _USE_COLOR else ""
+BLUE: str = "\033[0;34m" if _USE_COLOR else ""
+NC: str = "\033[0m" if _USE_COLOR else ""
 
 
 def print_header(msg: str) -> None:

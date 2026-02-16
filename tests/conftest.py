@@ -1,11 +1,13 @@
 """Shared fixtures, pytest markers, and env-var-based skip logic."""
 
+from __future__ import annotations
+
 import os
 
 import pytest
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "network: needs internet access (skip with MCTOMQTT_SKIP_NETWORK=1)"
     )
@@ -17,7 +19,7 @@ def pytest_configure(config):
     )
 
 
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     # network and system run by default; set SKIP vars to disable
     # e2e is opt-in; set MCTOMQTT_TEST_E2E=1 to enable
     for item in items:

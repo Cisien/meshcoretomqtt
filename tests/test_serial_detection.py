@@ -3,6 +3,8 @@
 Requires MCTOMQTT_TEST_SERIAL_DEVICE env var pointing to a real device.
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
@@ -14,7 +16,7 @@ pytestmark = pytest.mark.e2e
 
 
 @pytest.fixture()
-def serial_device():
+def serial_device() -> str:
     device = os.environ.get("MCTOMQTT_TEST_SERIAL_DEVICE")
     if not device:
         pytest.skip("Set MCTOMQTT_TEST_SERIAL_DEVICE=/dev/ttyACM0 to run")
@@ -22,7 +24,7 @@ def serial_device():
 
 
 class TestDetectSerialDevices:
-    def test_detects_env_device(self, serial_device):
+    def test_detects_env_device(self, serial_device: str) -> None:
         devices = detect_serial_devices()
         # The device or its symlink target should be in the list
         serial_resolved = str(Path(serial_device).resolve())
@@ -33,7 +35,7 @@ class TestDetectSerialDevices:
                 break
         assert found, f"{serial_device} not in detected devices: {devices}"
 
-    def test_at_least_one_char_device(self, serial_device):
+    def test_at_least_one_char_device(self, serial_device: str) -> None:
         devices = detect_serial_devices()
         assert len(devices) > 0
         # At least one should be a real character device

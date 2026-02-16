@@ -1,7 +1,10 @@
 """Tier 4: Tests for installer.system.create_system_user (Linux only)."""
 
+from __future__ import annotations
+
 import platform
 import subprocess
+from collections.abc import Generator
 
 import pytest
 
@@ -17,7 +20,7 @@ TEST_DIR = "/tmp/mctomqtt_test"
 
 
 @pytest.fixture(autouse=True)
-def cleanup_test_user():
+def cleanup_test_user() -> Generator[None, None, None]:
     """Ensure test user is removed after each test."""
     yield
     subprocess.run(
@@ -31,7 +34,7 @@ def cleanup_test_user():
 
 
 class TestCreateSystemUser:
-    def test_creates_user(self):
+    def test_creates_user(self) -> None:
         subprocess.run(["mkdir", "-p", TEST_DIR], check=True)
         create_system_user(TEST_USER, TEST_DIR)
 
@@ -40,7 +43,7 @@ class TestCreateSystemUser:
         )
         assert result.returncode == 0
 
-    def test_nologin_shell(self):
+    def test_nologin_shell(self) -> None:
         subprocess.run(["mkdir", "-p", TEST_DIR], check=True)
         create_system_user(TEST_USER, TEST_DIR)
 
@@ -53,7 +56,7 @@ class TestCreateSystemUser:
         shell = result.stdout.strip().split(":")[-1]
         assert "nologin" in shell
 
-    def test_serial_group_membership(self):
+    def test_serial_group_membership(self) -> None:
         subprocess.run(["mkdir", "-p", TEST_DIR], check=True)
         create_system_user(TEST_USER, TEST_DIR)
 
@@ -64,7 +67,7 @@ class TestCreateSystemUser:
         groups_str = result.stdout.lower()
         assert "dialout" in groups_str or "uucp" in groups_str
 
-    def test_idempotent(self, capsys):
+    def test_idempotent(self, capsys: pytest.CaptureFixture[str]) -> None:
         subprocess.run(["mkdir", "-p", TEST_DIR], check=True)
         create_system_user(TEST_USER, TEST_DIR)
         # Second call should succeed without error

@@ -3,8 +3,11 @@
 Requires MCTOMQTT_TEST_DOCKER=1 and Docker daemon running.
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -19,13 +22,13 @@ CONTAINER_NAME = "mctomqtt-test"
 
 
 @pytest.fixture(autouse=True)
-def require_docker():
+def require_docker() -> None:
     if not os.environ.get("MCTOMQTT_TEST_DOCKER"):
         pytest.skip("Set MCTOMQTT_TEST_DOCKER=1 to run")
 
 
 @pytest.fixture(autouse=True)
-def cleanup_container():
+def cleanup_container() -> Generator[None, None, None]:
     """Remove test container and image after each test."""
     yield
     docker = docker_cmd() or "docker"
@@ -40,12 +43,12 @@ def cleanup_container():
 
 
 class TestDocker:
-    def test_docker_cmd_available(self):
+    def test_docker_cmd_available(self) -> None:
         result = docker_cmd()
         assert result is not None, "Docker not available"
         assert "docker" in result
 
-    def test_build_image(self):
+    def test_build_image(self) -> None:
         docker = docker_cmd()
         assert docker is not None
         result = subprocess.run(
@@ -61,7 +64,7 @@ class TestDocker:
         )
         assert IMAGE_NAME in result.stdout
 
-    def test_container_starts(self):
+    def test_container_starts(self) -> None:
         docker = docker_cmd()
         assert docker is not None
 

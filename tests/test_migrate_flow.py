@@ -3,6 +3,8 @@
 Tests the full env-to-toml migration pipeline with real files.
 """
 
+from __future__ import annotations
+
 import tomllib
 from pathlib import Path
 
@@ -19,7 +21,7 @@ pytestmark = pytest.mark.e2e
 
 
 class TestMigrateFlow:
-    def test_full_migration_pipeline(self, tmp_path):
+    def test_full_migration_pipeline(self, tmp_path: Path) -> None:
         """Simulate a legacy installation and migrate to TOML."""
         # Create fake legacy installation
         old_dir = tmp_path / ".meshcoretomqtt"
@@ -95,7 +97,7 @@ class TestMigrateFlow:
         assert brokers[1]["auth"]["method"] == "password"
         assert brokers[1]["auth"]["username"] == "myuser"
 
-    def test_empty_legacy_produces_valid_toml(self, tmp_path):
+    def test_empty_legacy_produces_valid_toml(self, tmp_path: Path) -> None:
         """Empty legacy .env files produce valid (empty) TOML."""
         old_dir = tmp_path / ".meshcoretomqtt"
         old_dir.mkdir()
@@ -115,13 +117,13 @@ class TestMigrateFlow:
 
 
 class TestMigrateIdempotency:
-    def test_not_migrated_by_default(self, tmp_path):
+    def test_not_migrated_by_default(self, tmp_path: Path) -> None:
         """A fresh legacy directory is not marked as migrated."""
         old_dir = tmp_path / ".meshcoretomqtt"
         old_dir.mkdir()
         assert is_already_migrated(str(old_dir)) is False
 
-    def test_mark_migrated_creates_sentinel(self, tmp_path):
+    def test_mark_migrated_creates_sentinel(self, tmp_path: Path) -> None:
         """mark_migrated writes a sentinel file with the install path."""
         old_dir = tmp_path / ".meshcoretomqtt"
         old_dir.mkdir()
@@ -131,14 +133,14 @@ class TestMigrateIdempotency:
         assert sentinel.exists()
         assert "/opt/mctomqtt" in sentinel.read_text()
 
-    def test_is_already_migrated_after_mark(self, tmp_path):
+    def test_is_already_migrated_after_mark(self, tmp_path: Path) -> None:
         """is_already_migrated returns True after mark_migrated is called."""
         old_dir = tmp_path / ".meshcoretomqtt"
         old_dir.mkdir()
         mark_migrated(str(old_dir), "/opt/mctomqtt")
         assert is_already_migrated(str(old_dir)) is True
 
-    def test_mark_migrated_is_idempotent(self, tmp_path):
+    def test_mark_migrated_is_idempotent(self, tmp_path: Path) -> None:
         """Calling mark_migrated twice does not error."""
         old_dir = tmp_path / ".meshcoretomqtt"
         old_dir.mkdir()

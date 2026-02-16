@@ -8,7 +8,7 @@ import re
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from .ui import (
     print_error,

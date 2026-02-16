@@ -1,4 +1,5 @@
 """Entry point: python3 -m installer <subcommand> [options]"""
+from __future__ import annotations
 
 import argparse
 import os
@@ -26,7 +27,7 @@ def main() -> None:
 
     sub.add_parser("migrate", help="Migrate legacy ~/.meshcoretomqtt installation")
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     if not args.command:
         parser.print_help()

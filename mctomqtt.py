@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 __version__ = "1.0.7.0"
 
 import sys
@@ -17,6 +19,7 @@ import subprocess
 from datetime import datetime
 from time import sleep
 from pathlib import Path
+from typing import Any
 from auth_token import create_auth_token, read_private_key_file, verify_auth_token, decode_token_payload
 
 try:
@@ -46,9 +49,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class MeshCoreBridge:
-    last_raw: bytes = None
+    last_raw: str | None = None
 
-    def __init__(self, config, debug=False):
+    def __init__(self, config: dict[str, Any], debug: bool = False) -> None:
         self.debug = debug
         self.config = config
         self.repeater_name = None
@@ -101,7 +104,7 @@ class MeshCoreBridge:
 
         logger.info("Configuration loaded from TOML")
 
-    def _load_client_version(self):
+    def _load_client_version(self) -> str:
         """Load client version from __version__ and optionally append git hash from .version_info"""
         version = __version__
         try:
@@ -117,7 +120,7 @@ class MeshCoreBridge:
             logger.debug(f"Could not load version info: {e}")
         return f"meshcoretomqtt/{version}"
 
-    def _parse_allowed_companions(self, remote_cfg):
+    def _parse_allowed_companions(self, remote_cfg: dict[str, Any]) -> set[str]:
         """Parse allowed_companions from config into a set of public keys"""
         companions_list = remote_cfg.get('allowed_companions', [])
         if not companions_list:
@@ -136,7 +139,7 @@ class MeshCoreBridge:
             logger.info(f"Remote serial enabled with {len(companions)} allowed companion(s)")
         return companions
 
-    def _is_command_allowed(self, command):
+    def _is_command_allowed(self, command: str) -> tuple[bool, str | None]:
         """Check if a command is allowed (not in disallowed list)"""
         cmd_lower = command.strip().lower()
 
@@ -146,14 +149,14 @@ class MeshCoreBridge:
 
         return True, None
 
-    def _get_broker_config(self, broker_idx):
+    def _get_broker_config(self, broker_idx: int) -> dict[str, Any]:
         """Get broker config by index into the broker list"""
         brokers = self.config.get('broker', [])
         if broker_idx < len(brokers):
             return brokers[broker_idx]
         return {}
 
-    def resolve_topic_template(self, template, broker_idx=None):
+    def resolve_topic_template(self, template: str, broker_idx: int | None = None) -> str:
         """Resolve topic template with {IATA} and {PUBLIC_KEY} placeholders"""
         if not template:
             return template
@@ -172,7 +175,7 @@ class MeshCoreBridge:
         resolved = resolved.replace('{PUBLIC_KEY}', self.repeater_pub_key if self.repeater_pub_key else 'UNKNOWN')
         return resolved
 
-    def get_topic(self, topic_type, broker_idx=None):
+    def get_topic(self, topic_type: str, broker_idx: int | None = None) -> str:
         """Get topic with template resolution, checking broker-specific override first"""
         # Check broker-specific topic override
         if broker_idx is not None:
@@ -187,7 +190,7 @@ class MeshCoreBridge:
         global_topic = topics.get(topic_type, '')
         return self.resolve_topic_template(global_topic, broker_idx)
 
-    def sanitize_client_id(self, name):
+    def sanitize_client_id(self, name: str) -> str:
         """Convert repeater name to valid MQTT client ID"""
         # Use first broker's client_id_prefix or default
         brokers = self.config.get('broker', [])
@@ -198,7 +201,7 @@ class MeshCoreBridge:
         client_id = re.sub(r"[^a-zA-Z0-9_-]", "", client_id)
         return client_id[:23]
 
-    def generate_auth_credentials(self, broker_idx, force_refresh=False):
+    def generate_auth_credentials(self, broker_idx: int, force_refresh: bool = False) -> tuple[str | None, str | None]:
         """Generate authentication credentials for a broker on-demand"""
         broker = self._get_broker_config(broker_idx)
         auth = broker.get('auth', {})
@@ -264,7 +267,7 @@ class MeshCoreBridge:
             # No auth
             return '', ''
 
-    def connect_serial(self):
+    def connect_serial(self) -> bool:
         serial_cfg = self.config.get('serial', {})
         ports = serial_cfg.get('ports', ['/dev/ttyACM0'])
         baud_rate = serial_cfg.get('baud_rate', 115200)
@@ -295,7 +298,7 @@ class MeshCoreBridge:
         logger.error("Failed to connect to any serial port")
         return False
 
-    def close_serial(self):
+    def close_serial(self) -> None:
         """Close and clear the current serial handle if present."""
         try:
             if self.ser:
@@ -308,7 +311,7 @@ class MeshCoreBridge:
         finally:
             self.ser = None
 
-    def set_repeater_time(self):
+    def set_repeater_time(self) -> None:
         if not self.ser:
             return False
 
@@ -323,7 +326,7 @@ class MeshCoreBridge:
         response = self.ser.read_all().decode(errors='replace')
         logger.debug(f"Raw response: {response}")
 
-    def get_repeater_name(self):
+    def get_repeater_name(self) -> bool:
         if not self.ser:
             return False
 
@@ -348,7 +351,7 @@ class MeshCoreBridge:
         logger.error("Failed to get repeater name from response")
         return False
 
-    def get_repeater_pubkey(self):
+    def get_repeater_pubkey(self) -> bool:
         if not self.ser:
             return False
 
@@ -380,7 +383,7 @@ class MeshCoreBridge:
         logger.error("Failed to get repeater pub key from response")
         return False
 
-    def get_repeater_privkey(self):
+    def get_repeater_privkey(self) -> bool:
         if not self.ser:
             return False
 
@@ -411,7 +414,7 @@ class MeshCoreBridge:
         logger.error("Failed to get repeater priv key from response - command may not be supported by firmware")
         return False
 
-    def get_radio_info(self):
+    def get_radio_info(self) -> str | None:
         """Query the repeater for radio information"""
         if not self.ser:
             return None
@@ -435,7 +438,7 @@ class MeshCoreBridge:
         logger.error("Failed to get radio info from response")
         return None
 
-    def get_firmware_version(self):
+    def get_firmware_version(self) -> str | None:
         """Query the repeater for firmware version"""
         if not self.ser:
             return None
@@ -459,7 +462,7 @@ class MeshCoreBridge:
         logger.warning("Failed to get firmware version from response")
         return None
 
-    def get_board_type(self):
+    def get_board_type(self) -> str | None:
         """Query the repeater for board/hardware type"""
         if not self.ser:
             return None
@@ -485,7 +488,7 @@ class MeshCoreBridge:
         logger.warning("Failed to get board type from response")
         return None
 
-    def get_device_stats(self):
+    def get_device_stats(self) -> dict[str, Any]:
         """Query the repeater for device statistics (battery, uptime, errors, queue, radio stats)"""
         if not self.ser:
             return {}
@@ -545,7 +548,7 @@ class MeshCoreBridge:
 
         return stats
 
-    def _websocket_ping_loop(self, broker_idx, mqtt_client, transport):
+    def _websocket_ping_loop(self, broker_idx: int, mqtt_client: mqtt.Client, transport: str) -> None:
         """Send WebSocket PING frames periodically to keep connection alive"""
         if transport != "websockets":
             return
@@ -567,7 +570,7 @@ class MeshCoreBridge:
                 logger.debug(f"[{broker_idx}] WebSocket PING failed: {e}")
                 # Don't break the loop - connection might recover
 
-    def _stats_logging_loop(self):
+    def _stats_logging_loop(self) -> None:
         """Log statistics every 5 minutes"""
         stats_interval = 300
 
@@ -720,7 +723,7 @@ class MeshCoreBridge:
 
             self.stats['last_stats_log'] = time.time()
 
-    def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
+    def on_mqtt_connect(self, client: mqtt.Client, userdata: dict[str, Any] | None, flags: Any, rc: int, properties: Any = None) -> None:
         broker_name = userdata.get('name', 'unknown') if userdata else 'unknown'
         broker_idx = userdata.get('broker_idx', None) if userdata else None
 
@@ -783,7 +786,7 @@ class MeshCoreBridge:
             logger.error(f"[{broker_name}] Connection failed with code: {rc}")
 
 
-    def on_mqtt_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+    def on_mqtt_disconnect(self, client: mqtt.Client, userdata: dict[str, Any] | None, disconnect_flags: Any, reason_code: Any, properties: Any) -> None:
         broker_name = userdata.get('name', 'unknown') if userdata else 'unknown'
         broker_idx = userdata.get('broker_idx', None) if userdata else None
 
@@ -832,7 +835,7 @@ class MeshCoreBridge:
         if all_disconnected:
             self.mqtt_connected = False
 
-    def on_mqtt_message(self, client, userdata, msg):
+    def on_mqtt_message(self, client: mqtt.Client, userdata: dict[str, Any] | None, msg: Any) -> None:
         """Handle incoming MQTT messages (for remote serial commands)"""
         broker_idx = userdata.get('broker_idx', None) if userdata else None
         topic = msg.topic
@@ -851,7 +854,7 @@ class MeshCoreBridge:
         except Exception as e:
             logger.error(f"[SERIAL] Failed to handle command: {e}")
 
-    def _handle_serial_command(self, jwt_token, broker_idx):
+    def _handle_serial_command(self, jwt_token: str, broker_idx: int) -> None:
         """Process an incoming serial command JWT"""
         if not self.remote_serial_enabled:
             logger.warning("[SERIAL] Remote serial command received but feature is disabled")
@@ -930,7 +933,7 @@ class MeshCoreBridge:
         # Publish response
         self._publish_serial_response(command, nonce, success, response, broker_idx)
 
-    def _execute_serial_command(self, command):
+    def _execute_serial_command(self, command: str) -> tuple[bool, str]:
         """
         Execute a serial command on the node and capture the response.
         Returns (success: bool, response: str)
@@ -1002,7 +1005,7 @@ class MeshCoreBridge:
             logger.error(f"[SERIAL] Error executing command: {e}")
             return False, f"Error: {str(e)}"
 
-    def _publish_serial_response(self, command, request_id, success, response, broker_idx=None):
+    def _publish_serial_response(self, command: str, request_id: str, success: bool, response: str, broker_idx: int | None = None) -> None:
         """Create and publish a signed response JWT"""
         if not self.repeater_priv_key or not self.repeater_pub_key:
             logger.error("[SERIAL] Cannot sign response - private key not available")
@@ -1050,7 +1053,7 @@ class MeshCoreBridge:
         except Exception as e:
             logger.error(f"[SERIAL] Failed to create/publish response: {e}")
 
-    def _cleanup_old_nonces(self):
+    def _cleanup_old_nonces(self) -> None:
         """Remove expired nonces from the tracking dict"""
         current_time = int(time.time())
         cutoff_time = current_time - self.remote_serial_nonce_ttl
@@ -1062,7 +1065,7 @@ class MeshCoreBridge:
         if expired:
             logger.debug(f"[SERIAL] Cleaned up {len(expired)} expired nonces")
 
-    def _subscribe_serial_commands(self, client, broker_idx):
+    def _subscribe_serial_commands(self, client: mqtt.Client, broker_idx: int) -> None:
         """Subscribe to the serial/commands topic for this node"""
         if not self.remote_serial_enabled:
             return
@@ -1087,7 +1090,7 @@ class MeshCoreBridge:
         except Exception as e:
             logger.error(f"[{broker_name}] Error subscribing to {topic}: {e}")
 
-    def build_status_message(self, status, include_stats=True):
+    def build_status_message(self, status: str, include_stats: bool = True) -> dict[str, Any]:
         """Build a status message with all required fields"""
         message = {
             "status": status,
@@ -1106,7 +1109,7 @@ class MeshCoreBridge:
 
         return message
 
-    def publish_status(self, status, client=None, broker_idx=None):
+    def publish_status(self, status: str, client: mqtt.Client | None = None, broker_idx: int | None = None) -> None:
         """Publish online status with stats (NOT retained)"""
         status_msg = self.build_status_message(status, include_stats=True)
         status_topic = self.get_topic("status", broker_idx)
@@ -1118,7 +1121,7 @@ class MeshCoreBridge:
 
         logger.debug(f"Published status: {status}")
 
-    def safe_publish(self, topic, payload, retain=False, client=None, broker_idx=None):
+    def safe_publish(self, topic: str, payload: str, retain: bool = False, client: mqtt.Client | None = None, broker_idx: int | None = None) -> bool:
         """Publish to one or all MQTT brokers"""
         if not self.mqtt_connected:
             logger.warning(f"Not connected - skipping publish to {topic}")
@@ -1155,7 +1158,7 @@ class MeshCoreBridge:
 
         return success
 
-    def _create_mqtt_client(self, broker_idx):
+    def _create_mqtt_client(self, broker_idx: int) -> mqtt.Client | None:
         """
         Internal: Create and configure an MQTT client (doesn't connect).
         """
@@ -1219,7 +1222,7 @@ class MeshCoreBridge:
 
         return mqtt_client
 
-    def create_and_connect_broker(self, broker_idx):
+    def create_and_connect_broker(self, broker_idx: int) -> dict[str, Any] | None:
         """
         Create a fresh MQTT client and connect it.
         Returns client_info dict on success, None on failure.
@@ -1286,7 +1289,7 @@ class MeshCoreBridge:
             logger.error(f"[{broker_name}] Failed to connect: {e}")
             return None
 
-    def connect_mqtt(self):
+    def connect_mqtt(self) -> bool:
         """Initial connection to all configured MQTT brokers"""
         brokers = self.config.get('broker', [])
         logger.debug("=== MQTT Broker Configuration ===")
@@ -1335,7 +1338,7 @@ class MeshCoreBridge:
 
         return True
 
-    def _stop_websocket_ping_thread(self, broker_idx):
+    def _stop_websocket_ping_thread(self, broker_idx: int) -> None:
         """Cleanly stop the WebSocket ping thread for a broker"""
         if broker_idx in self.ws_ping_threads:
             self.ws_ping_threads[broker_idx]['active'] = False
@@ -1346,7 +1349,7 @@ class MeshCoreBridge:
             broker = self._get_broker_config(broker_idx)
             logger.debug(f"[{broker.get('name', broker_idx)}] Stopped WebSocket ping thread")
 
-    def reconnect_disconnected_brokers(self):
+    def reconnect_disconnected_brokers(self) -> None:
         """
         Check for disconnected brokers and recreate them.
         Exit after max_reconnect_attempts consecutive failures per broker.
@@ -1407,7 +1410,7 @@ class MeshCoreBridge:
                 self.reconnect_delay = min(self.reconnect_delay * self.reconnect_backoff, self.max_reconnect_delay)
                 logger.warning(f"[{broker_name}] Failed to recreate client (attempt #{failed_attempts + 1}/{self.max_reconnect_attempts})")
 
-    def parse_and_publish(self, line):
+    def parse_and_publish(self, line: str) -> None:
         if not line:
             return
         logger.debug(f"From Radio: {line}")
@@ -1482,12 +1485,12 @@ class MeshCoreBridge:
                 self.safe_publish(packets_topic, json.dumps(message))
             return
 
-    def handle_signal(self, signum, frame):
+    def handle_signal(self, signum: int, frame: Any) -> None:
         """Signal handler to trigger graceful shutdown."""
         logger.info(f"Received signal {signum}, shutting down...")
         self.should_exit = True
 
-    def wait_for_system_time_sync(self):
+    def wait_for_system_time_sync(self) -> bool:
         """
         Wait up to 60 seconds for system clock synchronization via timedatectl.
 
@@ -1522,7 +1525,7 @@ class MeshCoreBridge:
         return True
 
 
-    def run(self):
+    def run(self) -> None:
         log_config_sources(self.config)
 
         if not self.connect_serial():
@@ -1651,7 +1654,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--config", action="append", default=None, help="Path to TOML config file (can be specified multiple times; overrides default config loading)")
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     if args.debug:
         logger.setLevel(logging.DEBUG)

@@ -3,6 +3,8 @@
 All tests use script_version="test" to signal test traffic per LetsMesh convention.
 """
 
+from __future__ import annotations
+
 import pytest
 
 from installer.config import lookup_iata_code, search_iata_api
@@ -11,17 +13,17 @@ pytestmark = pytest.mark.network
 
 
 class TestSearchIataApi:
-    def test_seattle_returns_results(self):
+    def test_seattle_returns_results(self) -> None:
         results = search_iata_api("Seattle", script_version="test")
         assert len(results) > 0
         codes = [code for code, name in results]
         assert "SEA" in codes
 
-    def test_nonsense_query_empty(self):
+    def test_nonsense_query_empty(self) -> None:
         results = search_iata_api("XXXNOTREAL999", script_version="test")
         assert results == []
 
-    def test_returns_tuples(self):
+    def test_returns_tuples(self) -> None:
         results = search_iata_api("Los Angeles", script_version="test")
         assert len(results) > 0
         for item in results:
@@ -32,18 +34,18 @@ class TestSearchIataApi:
 
 
 class TestLookupIataCode:
-    def test_sea_returns_name(self):
+    def test_sea_returns_name(self) -> None:
         name = lookup_iata_code("SEA", script_version="test")
         assert name is not None
         assert isinstance(name, str)
         assert len(name) > 0
 
-    def test_lax_returns_name(self):
+    def test_lax_returns_name(self) -> None:
         name = lookup_iata_code("LAX", script_version="test")
         assert name is not None
         assert len(name) > 0
 
-    def test_invalid_code_returns_none(self):
+    def test_invalid_code_returns_none(self) -> None:
         name = lookup_iata_code("ZZZ", script_version="test")
         # ZZZ may or may not exist — but truly invalid codes should return None
         # Use a more obviously invalid code

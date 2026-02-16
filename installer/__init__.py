@@ -1,4 +1,5 @@
 """MeshCore to MQTT installer package."""
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 
@@ -21,5 +22,5 @@ class InstallerContext:
     base_url: str = ""
     repo_dir: str = ""  # path to extracted repo archive
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.base_url = f"https://raw.githubusercontent.com/{self.repo}/{self.branch}"

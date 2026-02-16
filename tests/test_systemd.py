@@ -4,9 +4,12 @@ Requires MCTOMQTT_TEST_SYSTEMD=1 and sudo access.
 Uses a test unit name (mctomqtt-test.service) to avoid clobbering production.
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import tempfile
+from collections.abc import Generator
 
 import pytest
 
@@ -17,13 +20,13 @@ UNIT_PATH = f"/etc/systemd/system/{SERVICE_NAME}.service"
 
 
 @pytest.fixture(autouse=True)
-def require_systemd():
+def require_systemd() -> None:
     if not os.environ.get("MCTOMQTT_TEST_SYSTEMD"):
         pytest.skip("Set MCTOMQTT_TEST_SYSTEMD=1 to run")
 
 
 @pytest.fixture(autouse=True)
-def cleanup_service():
+def cleanup_service() -> Generator[None, None, None]:
     """Ensure test service is removed after each test."""
     yield
     subprocess.run(
@@ -44,7 +47,7 @@ def cleanup_service():
     )
 
 
-def _install_test_unit():
+def _install_test_unit() -> None:
     """Install a minimal test systemd unit that just sleeps."""
     unit_content = f"""[Unit]
 Description=MeshCore to MQTT Test Service
@@ -67,7 +70,7 @@ WantedBy=multi-user.target
 
 
 class TestSystemdService:
-    def test_install_and_enable(self):
+    def test_install_and_enable(self) -> None:
         _install_test_unit()
         subprocess.run(
             ["sudo", "systemctl", "enable", f"{SERVICE_NAME}.service"],
@@ -80,7 +83,7 @@ class TestSystemdService:
         )
         assert result.stdout.strip() == "enabled"
 
-    def test_start_and_active(self):
+    def test_start_and_active(self) -> None:
         _install_test_unit()
         subprocess.run(
             ["sudo", "systemctl", "enable", "--now", f"{SERVICE_NAME}.service"],
@@ -93,7 +96,7 @@ class TestSystemdService:
         )
         assert result.stdout.strip() == "active"
 
-    def test_stop_and_disable_clean(self):
+    def test_stop_and_disable_clean(self) -> None:
         _install_test_unit()
         subprocess.run(
             ["sudo", "systemctl", "enable", "--now", f"{SERVICE_NAME}.service"],

@@ -3,7 +3,10 @@
 Uses tomllib to verify output is valid TOML that parses to expected structures.
 """
 
+from __future__ import annotations
+
 import tomllib
+from pathlib import Path
 
 from config_loader import merge_broker_lists
 from installer.config import (
@@ -18,7 +21,7 @@ from installer.config import (
 
 
 class TestWriteUserTomlBase:
-    def test_creates_file_with_sections(self, tmp_path):
+    def test_creates_file_with_sections(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "Cisien/meshcoretomqtt", "main")
 
@@ -30,7 +33,7 @@ class TestWriteUserTomlBase:
         assert data["update"]["repo"] == "Cisien/meshcoretomqtt"
         assert data["update"]["branch"] == "main"
 
-    def test_special_chars_escaped(self, tmp_path):
+    def test_special_chars_escaped(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, 'S"A', "/dev/t\\y", "repo", "branch")
 
@@ -42,7 +45,7 @@ class TestWriteUserTomlBase:
 
 
 class TestAppendLetsmeshBrokerToml:
-    def test_appends_valid_broker_block(self, tmp_path):
+    def test_appends_valid_broker_block(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_letsmesh_broker_toml(
@@ -64,7 +67,7 @@ class TestAppendLetsmeshBrokerToml:
         assert brokers[0]["auth"]["owner"] == "OWNER123"
         assert brokers[0]["auth"]["email"] == "test@example.com"
 
-    def test_two_brokers_us_eu(self, tmp_path):
+    def test_two_brokers_us_eu(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_letsmesh_broker_toml(
@@ -85,7 +88,7 @@ class TestAppendLetsmeshBrokerToml:
 
 
 class TestAppendDisabledBrokerToml:
-    def test_produces_valid_toml(self, tmp_path):
+    def test_produces_valid_toml(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_disabled_broker_toml(dest, "letsmesh-us")
@@ -97,7 +100,7 @@ class TestAppendDisabledBrokerToml:
         assert broker["name"] == "letsmesh-us"
         assert broker["enabled"] is False
 
-    def test_disable_both_letsmesh_brokers(self, tmp_path):
+    def test_disable_both_letsmesh_brokers(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_disabled_broker_toml(dest, "letsmesh-us")
@@ -109,7 +112,7 @@ class TestAppendDisabledBrokerToml:
         assert len(data["broker"]) == 2
         assert all(b["enabled"] is False for b in data["broker"])
 
-    def test_override_merges_with_base_config(self, tmp_path):
+    def test_override_merges_with_base_config(self, tmp_path: Path) -> None:
         """Disabled override merges into base config and disables the broker."""
         # Write a base config with both brokers enabled
         base = tmp_path / "config.toml"
@@ -141,7 +144,7 @@ class TestAppendDisabledBrokerToml:
 
 
 class TestAppendCustomBrokerToml:
-    def test_password_auth(self, tmp_path):
+    def test_password_auth(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_custom_broker_toml(
@@ -158,7 +161,7 @@ class TestAppendCustomBrokerToml:
         assert broker["auth"]["username"] == "user"
         assert broker["auth"]["password"] == "pass"
 
-    def test_token_auth(self, tmp_path):
+    def test_token_auth(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_custom_broker_toml(
@@ -176,7 +179,7 @@ class TestAppendCustomBrokerToml:
         assert broker["auth"]["owner"] == "owner"
         assert broker["auth"]["email"] == "e@x.com"
 
-    def test_no_auth(self, tmp_path):
+    def test_no_auth(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_custom_broker_toml(
@@ -189,7 +192,7 @@ class TestAppendCustomBrokerToml:
 
         assert data["broker"][0]["auth"]["method"] == "none"
 
-    def test_tls_enabled(self, tmp_path):
+    def test_tls_enabled(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_custom_broker_toml(
@@ -203,7 +206,7 @@ class TestAppendCustomBrokerToml:
         assert data["broker"][0]["tls"]["enabled"] is True
         assert data["broker"][0]["tls"]["verify"] is True
 
-    def test_tls_disabled(self, tmp_path):
+    def test_tls_disabled(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_custom_broker_toml(
@@ -218,7 +221,7 @@ class TestAppendCustomBrokerToml:
 
 
 class TestAppendRemoteSerialToml:
-    def test_with_companions(self, tmp_path):
+    def test_with_companions(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_remote_serial_toml(dest, "KEY1,KEY2")
@@ -229,7 +232,7 @@ class TestAppendRemoteSerialToml:
         assert data["remote_serial"]["enabled"] is True
         assert data["remote_serial"]["allowed_companions"] == ["KEY1", "KEY2"]
 
-    def test_empty_companions(self, tmp_path):
+    def test_empty_companions(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         append_remote_serial_toml(dest, "")
@@ -242,22 +245,22 @@ class TestAppendRemoteSerialToml:
 
 
 class TestReadExistingIata:
-    def test_reads_iata(self, tmp_path):
+    def test_reads_iata(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         assert _read_existing_iata(dest) == "SEA"
 
-    def test_no_iata(self, tmp_path):
+    def test_no_iata(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         (tmp_path / "00-user.toml").write_text("[serial]\nports = []\n")
         assert _read_existing_iata(dest) == ""
 
-    def test_nonexistent_file(self):
+    def test_nonexistent_file(self) -> None:
         assert _read_existing_iata("/nonexistent/00-user.toml") == ""
 
 
 class TestUpdateIataInFile:
-    def test_updates_iata(self, tmp_path):
+    def test_updates_iata(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         _update_iata_in_file(dest, "LAX")
@@ -267,7 +270,7 @@ class TestUpdateIataInFile:
 
         assert data["general"]["iata"] == "LAX"
 
-    def test_preserves_other_content(self, tmp_path):
+    def test_preserves_other_content(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "00-user.toml")
         write_user_toml_base(dest, "SEA", "/dev/ttyACM0", "repo", "main")
         _update_iata_in_file(dest, "LAX")
@@ -280,7 +283,7 @@ class TestUpdateIataInFile:
 
 
 class TestFullComposition:
-    def test_complete_config_roundtrip(self, tmp_path):
+    def test_complete_config_roundtrip(self, tmp_path: Path) -> None:
         """Build a complete config and verify everything via tomllib."""
         dest = str(tmp_path / "00-user.toml")
 

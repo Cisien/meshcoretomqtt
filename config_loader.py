@@ -6,11 +6,12 @@ import logging
 import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def deep_merge(base, override):
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Deep merge two dicts. override values take precedence."""
     result = base.copy()
     for key, value in override.items():
@@ -21,7 +22,7 @@ def deep_merge(base, override):
     return result
 
 
-def merge_broker_lists(base_brokers, override_brokers):
+def merge_broker_lists(base_brokers: list[dict[str, Any]], override_brokers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge broker lists by name. Override brokers replace base brokers with the same name."""
     if not override_brokers:
         return base_brokers
@@ -41,7 +42,7 @@ def merge_broker_lists(base_brokers, override_brokers):
     return result
 
 
-def _apply_override(config: dict, override: dict) -> dict:
+def _apply_override(config: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Merge an override dict into config, handling broker lists specially."""
     override_brokers = override.pop('broker', None)
     config_brokers = config.get('broker', [])
@@ -51,13 +52,13 @@ def _apply_override(config: dict, override: dict) -> dict:
     return config
 
 
-def _load_toml(path: str | Path) -> dict:
+def _load_toml(path: str | Path) -> dict[str, Any]:
     """Load a single TOML file and return its contents as a dict."""
     with open(path, 'rb') as f:
         return tomllib.load(f)
 
 
-def _load_config_dir(config: dict, config_d: Path) -> dict:
+def _load_config_dir(config: dict[str, Any], config_d: Path) -> dict[str, Any]:
     """Load all *.toml files from a config.d directory as overlays."""
     if not config_d.is_dir():
         return config
@@ -68,7 +69,7 @@ def _load_config_dir(config: dict, config_d: Path) -> dict:
     return config
 
 
-def load_config(config_paths: list[str] | None = None) -> dict:
+def load_config(config_paths: list[str] | None = None) -> dict[str, Any]:
     """Load and merge TOML configuration.
 
     When no --config paths are provided (default):
@@ -105,7 +106,7 @@ def load_config(config_paths: list[str] | None = None) -> dict:
     return config
 
 
-def log_config_sources(config):
+def log_config_sources(config: dict[str, Any]) -> None:
     """Log configuration summary."""
     general = config.get('general', {})
     brokers = config.get('broker', [])

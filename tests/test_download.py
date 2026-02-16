@@ -1,5 +1,7 @@
 """Tier 3: Tests for installer.system download functions with real curl to GitHub."""
 
+from __future__ import annotations
+
 import subprocess
 from pathlib import Path
 
@@ -11,7 +13,7 @@ pytestmark = pytest.mark.network
 
 
 class TestDownloadFile:
-    def test_download_known_file(self, tmp_path):
+    def test_download_known_file(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "README.md")
         download_file(
             "https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/README.md",
@@ -22,7 +24,7 @@ class TestDownloadFile:
         assert len(content) > 0
         assert "meshcoretomqtt" in content.lower()
 
-    def test_invalid_url_raises(self, tmp_path):
+    def test_invalid_url_raises(self, tmp_path: Path) -> None:
         dest = str(tmp_path / "nonexistent")
         with pytest.raises(subprocess.CalledProcessError):
             download_file(
@@ -33,7 +35,7 @@ class TestDownloadFile:
 
 
 class TestDownloadRepoArchive:
-    def test_download_and_extract(self, tmp_path):
+    def test_download_and_extract(self, tmp_path: Path) -> None:
         repo_dir = download_repo_archive("Cisien/meshcoretomqtt", "main", str(tmp_path))
         repo_path = Path(repo_dir)
         assert repo_path.is_dir()
@@ -41,6 +43,6 @@ class TestDownloadRepoArchive:
         assert (repo_path / "auth_token.py").exists()
         assert (repo_path / "README.md").exists()
 
-    def test_invalid_branch_raises(self, tmp_path):
+    def test_invalid_branch_raises(self, tmp_path: Path) -> None:
         with pytest.raises(subprocess.CalledProcessError):
             download_repo_archive("Cisien/meshcoretomqtt", "nonexistent-branch-12345", str(tmp_path))
