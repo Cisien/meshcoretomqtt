@@ -212,12 +212,52 @@ def set_permissions(install_dir: str, config_dir: str, svc_user: str) -> None:
 # Docker helpers
 # ---------------------------------------------------------------------------
 
+GHCR_IMAGE = "ghcr.io/cisien/meshcoretomqtt:latest"
+LOCAL_IMAGE = "mctomqtt:latest"
+
+
 def docker_cmd() -> str | None:
     """Return 'docker' if the daemon is reachable, or None."""
     result = run_cmd(["docker", "info"], check=False, capture=True)
     if result.returncode == 0:
         return "docker"
     return None
+
+
+def pull_or_build_docker_image(ctx: InstallerContext) -> str | None:
+    """Pull image from GHCR or fall back to a local build. Returns image name or None."""
+    print_info("Attempting to pull image from registry...")
+    result = run_cmd(["docker", "pull", GHCR_IMAGE], check=False, capture=True)
+    if result.returncode == 0:
+        print_success("Image pulled successfully from registry")
+        run_cmd(["docker", "tag", GHCR_IMAGE, LOCAL_IMAGE], check=False)
+        return LOCAL_IMAGE
+
+    print_warning("Failed to pull image from registry (network issue or image not available)")
+    print_info("Falling back to local build...")
+
+    dockerfile_path = Path(ctx.install_dir) / "Dockerfile"
+    if not dockerfile_path.exists():
+        if ctx.repo_dir:
+            src = Path(ctx.repo_dir) / "Dockerfile"
+            if src.exists():
+                shutil.copy2(str(src), str(dockerfile_path))
+            else:
+                print_error("Dockerfile not found in repository archive")
+                return None
+        else:
+            print_error("No repository archive available for Dockerfile")
+            return None
+
+    print_info(f"Building {LOCAL_IMAGE} image...")
+    print()
+    result = run_cmd(["docker", "build", "-t", LOCAL_IMAGE, ctx.install_dir], check=False)
+    if result.returncode != 0:
+        print_error("Failed to build Docker image")
+        return None
+    print_success("Docker image built successfully")
+    print()
+    return LOCAL_IMAGE
 
 
 # ---------------------------------------------------------------------------
@@ -598,30 +638,11 @@ def install_docker_service(ctx: InstallerContext) -> bool:
     result = run_cmd(["docker", "--version"], capture=True)
     print_success(f"Docker found: {result.stdout.strip()}")
 
-    print_header("Building Docker Image")
+    print_header("Docker Image Setup")
 
-    dockerfile_path = Path(ctx.install_dir) / "Dockerfile"
-    if not dockerfile_path.exists():
-        # Copy Dockerfile from repo archive
-        if ctx.repo_dir:
-            src = Path(ctx.repo_dir) / "Dockerfile"
-            if src.exists():
-                shutil.copy2(str(src), str(dockerfile_path))
-            else:
-                print_error("Dockerfile not found in repository archive")
-                return False
-        else:
-            print_error("No repository archive available for Dockerfile")
-            return False
-
-    print_info("Building mctomqtt:latest image...")
-    print()
-    result = run_cmd(["docker", "build", "-t", "mctomqtt:latest", ctx.install_dir], check=False)
-    if result.returncode != 0:
-        print_error("Failed to build Docker image")
+    image = pull_or_build_docker_image(ctx)
+    if image is None:
         return False
-    print_success("Docker image built successfully")
-    print()
 
     # Get serial device from 00-user.toml
     serial_device = "/dev/ttyACM0"
@@ -643,7 +664,7 @@ def install_docker_service(ctx: InstallerContext) -> bool:
         parts.append(f"--device={serial_device}")
     else:
         print_warning(f"Serial device {serial_device} not found - container will start but may not connect")
-    parts.append("mctomqtt:latest")
+    parts.append(image)
 
     print()
     print_info("Docker run command:")

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from .config import configure_mqtt_brokers, update_owner_info
 from .system import (
+    LOCAL_IMAGE,
     check_service_health,
     create_version_info,
     create_venv,
@@ -22,6 +23,7 @@ from .system import (
     install_launchd_service,
     install_meshcore_decoder,
     install_systemd_service,
+    pull_or_build_docker_image,
     run_cmd,
     set_permissions,
 )
@@ -203,52 +205,44 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     print_info(f"Detected existing installation type: {system_type}")
 
     if system_type == "docker":
-        if ctx.update_mode or prompt_yes_no("Rebuild and restart Docker container?", "y"):
-            # Copy latest Dockerfile from repo archive
+        if ctx.update_mode or prompt_yes_no("Update and restart Docker container?", "y"):
+            # Copy latest Dockerfile from repo archive (for local build fallback)
             dockerfile_src = os.path.join(repo_dir, "Dockerfile")
             if os.path.exists(dockerfile_src):
                 shutil.copy2(dockerfile_src, f"{ctx.install_dir}/Dockerfile")
+
+            # Pull from registry or build locally
+            image = pull_or_build_docker_image(ctx)
+            if image is None:
+                print_error("Failed to obtain Docker image")
             else:
-                print_warning("Dockerfile not found in repository archive")
+                # Restart container
+                ps_result = run_cmd(["docker", "ps", "-a"], check=False, capture=True)
+                if ps_result.returncode == 0 and "mctomqtt" in ps_result.stdout:
+                    print_info("Restarting container...")
+                    run_cmd(["docker", "stop", "mctomqtt"], check=False)
+                    run_cmd(["docker", "rm", "mctomqtt"], check=False)
 
-            # Rebuild
-            print_info("Rebuilding Docker image...")
-            if Path(ctx.install_dir, "Dockerfile").exists():
-                print()
-                result = run_cmd(["docker", "build", "-t", "mctomqtt:latest", ctx.install_dir], check=False)
-                if result.returncode == 0:
-                    print_success("Docker image rebuilt")
-                else:
-                    print_error("Failed to rebuild Docker image")
-                print()
+                    # Recreate container
+                    serial_device = "/dev/ttyACM0"
+                    if user_toml.exists():
+                        match = re.search(r'^\s*ports\s*=\s*\["([^"]+)"', user_toml.read_text(), re.MULTILINE)
+                        if match:
+                            serial_device = match.group(1)
 
-            # Restart container
-            ps_result = run_cmd(["docker", "ps", "-a"], check=False, capture=True)
-            if ps_result.returncode == 0 and "mctomqtt" in ps_result.stdout:
-                print_info("Restarting container...")
-                run_cmd(["docker", "stop", "mctomqtt"], check=False)
-                run_cmd(["docker", "rm", "mctomqtt"], check=False)
+                    parts: list[str] = [
+                        "docker", "run", "-d", "--name", "mctomqtt", "--restart", "unless-stopped",
+                        "-v", f"{ctx.config_dir}/config.toml:/etc/mctomqtt/config.toml:ro",
+                    ]
+                    if user_toml.exists():
+                        parts.extend(["-v", f"{ctx.config_dir}/config.d/00-user.toml:/etc/mctomqtt/config.d/00-user.toml:ro"])
+                    if Path(serial_device).exists():
+                        parts.append(f"--device={serial_device}")
+                    parts.append(image)
 
-                # Recreate container
-                serial_device = "/dev/ttyACM0"
-                if user_toml.exists():
-                    match = re.search(r'^\s*ports\s*=\s*\["([^"]+)"', user_toml.read_text(), re.MULTILINE)
-                    if match:
-                        serial_device = match.group(1)
-
-                parts = [
-                    "docker", "run", "-d", "--name", "mctomqtt", "--restart", "unless-stopped",
-                    "-v", f"{ctx.config_dir}/config.toml:/etc/mctomqtt/config.toml:ro",
-                ]
-                if user_toml.exists():
-                    parts.extend(["-v", f"{ctx.config_dir}/config.d/00-user.toml:/etc/mctomqtt/config.d/00-user.toml:ro"])
-                if Path(serial_device).exists():
-                    parts.append(f"--device={serial_device}")
-                parts.append("mctomqtt:latest")
-
-                result = run_cmd(parts, check=False)
-                if result.returncode == 0:
-                    check_service_health("docker")
+                    result = run_cmd(parts, check=False)
+                    if result.returncode == 0:
+                        check_service_health("docker")
 
     elif system_type == "systemd":
         install_systemd_service(
