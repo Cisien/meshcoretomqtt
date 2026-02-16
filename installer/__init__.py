@@ -1,7 +1,33 @@
 """MeshCore to MQTT installer package."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def parse_version_tuple(version_str: str) -> tuple[int, ...]:
+    """Parse a version string like '1.1.0.0-preview' into a comparable tuple of ints.
+
+    Non-numeric suffixes (e.g. '-preview') are stripped. Returns (0,) on failure.
+    """
+    # Strip suffixes like '-preview', '-beta', etc.
+    base = version_str.split("-")[0]
+    try:
+        return tuple(int(p) for p in base.split(".") if p)
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+def extract_version_from_file(path: str | Path) -> str:
+    """Extract __version__ string from a Python source file."""
+    for line in Path(path).read_text().splitlines():
+        if line.startswith("__version__"):
+            match = re.search(r'"([^"]+)"', line)
+            if match:
+                return match.group(1)
+            break
+    return "unknown"
 
 
 @dataclass

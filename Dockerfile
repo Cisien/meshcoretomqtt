@@ -23,7 +23,7 @@ FROM python:3.11-alpine
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-WORKDIR /opt
+WORKDIR /opt/mctomqtt/
 
 # Install dependencies including Node.js runtime
 RUN apk add --no-cache \
@@ -36,15 +36,12 @@ RUN apk add --no-cache \
 # Copy the entire Node structure from builder to ensure symlinks and paths remain valid
 COPY --from=builder /usr/local /usr/local
 # Copy application files
-COPY ./mctomqtt.py ./auth_token.py /opt/
-
-# Create config directory and copy default config
-RUN mkdir -p /etc/mctomqtt/config.d
-COPY ./config.toml.example /etc/mctomqtt/config.toml
+COPY ./mctomqtt.py ./auth_token.py ./config_loader.py /opt/mctomqtt/
+COPY ./bridge/ /opt/mctomqtt/bridge/
 
 # Note: Mount your config as a volume:
 #   -v /path/to/config.toml:/etc/mctomqtt/config.toml
 # Or mount a drop-in override:
 #   -v /path/to/00-user.toml:/etc/mctomqtt/config.d/00-user.toml
-
-CMD ["python3", "/opt/mctomqtt.py", "--config", "/etc/mctomqtt/config.toml"]
+USER mctomqtt
+CMD ["python3", "/opt/mctomqtt/mctomqtt.py"]

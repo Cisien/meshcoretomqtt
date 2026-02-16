@@ -68,15 +68,16 @@ else
         echo "Error: Failed to download repository archive"; exit 1
     }
     REPO_NAME=$(echo "$REPO" | cut -d'/' -f2)
+    BRANCH_SANITIZED=$(echo "$BRANCH" | tr '/' '-')
     unzip -q "$TMP_DIR/repo.zip" -d "$TMP_DIR" || {
         echo "Error: Failed to extract repository archive"; exit 1
     }
     rm -f "$TMP_DIR/repo.zip"
-    cp -r "$TMP_DIR/$REPO_NAME-$BRANCH/installer" "$TMP_DIR/installer"
+    cp -r "$TMP_DIR/$REPO_NAME-$BRANCH_SANITIZED/installer" "$TMP_DIR/installer"
 fi
 
 # Run Python updater
 export INSTALL_REPO="$REPO"
 export INSTALL_BRANCH="$BRANCH"
 cd "$TMP_DIR"
-python3 -m installer update --repo "$REPO" --branch "$BRANCH" "${EXTRA_ARGS[@]}"
+python3 -m installer update "${EXTRA_ARGS[@]}"

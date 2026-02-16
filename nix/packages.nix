@@ -55,10 +55,14 @@
       ];
 
       installPhase = ''
-        # Install both Python files as modules
+        # Install Python files as modules
         mkdir -p $out/${pkgs.python313.sitePackages}
         install -Dm755 mctomqtt.py $out/${pkgs.python313.sitePackages}/mctomqtt.py
         install -Dm755 auth_token.py $out/${pkgs.python313.sitePackages}/auth_token.py
+        install -Dm644 config_loader.py $out/${pkgs.python313.sitePackages}/config_loader.py
+        # Copy the bridge package
+        mkdir -p $out/${pkgs.python313.sitePackages}/bridge
+        cp bridge/*.py $out/${pkgs.python313.sitePackages}/bridge/
         # Copy the pre-generated version info file
         install -Dm644 ${version-info}/.version_info $out/${pkgs.python313.sitePackages}/.version_info
 

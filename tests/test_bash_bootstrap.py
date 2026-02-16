@@ -37,6 +37,25 @@ class TestBashSyntax:
         assert result.returncode == 0, f"Syntax error: {result.stderr}"
 
 
+class TestBranchSanitization:
+    """Verify bootstrap scripts sanitize slashes in branch names."""
+
+    def test_install_sh_sanitizes_branch_slash(self) -> None:
+        """install.sh must replace '/' with '-' for the extracted directory name."""
+        result = subprocess.run(
+            ["bash", "-c",
+             'BRANCH="cisien/overhaul"; BRANCH_SANITIZED=$(echo "$BRANCH" | tr \'/\' \'-\'); echo "$BRANCH_SANITIZED"'],
+            capture_output=True, text=True,
+        )
+        assert result.stdout.strip() == "cisien-overhaul"
+
+    def test_install_sh_contains_sanitization(self) -> None:
+        """install.sh must use BRANCH_SANITIZED in the cp path."""
+        content = (PROJECT_ROOT / "install.sh").read_text()
+        assert "BRANCH_SANITIZED" in content
+        assert '$REPO_NAME-$BRANCH_SANITIZED' in content
+
+
 class TestBootstrapHelp:
     def test_install_sh_help(self) -> None:
         """LOCAL_INSTALL bootstrap copies installer and runs argparse help."""

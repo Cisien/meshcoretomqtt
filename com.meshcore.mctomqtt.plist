@@ -8,8 +8,6 @@
     <array>
         <string>/opt/mctomqtt/venv/bin/python3</string>
         <string>/opt/mctomqtt/mctomqtt.py</string>
-        <string>--config</string>
-        <string>/etc/mctomqtt/config.toml</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/opt/mctomqtt</string>

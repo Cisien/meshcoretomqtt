@@ -32,17 +32,35 @@ docker run -d --name mctomqtt --device=/dev/ttyACM0 \
 
 ## Architecture
 
-The runtime codebase is two Python files (project metadata in `pyproject.toml`):
+The runtime codebase is a `bridge/` Python package with a thin entry point (project metadata in `pyproject.toml`):
 
-- **`mctomqtt.py`** — The entire application. Contains the `MeshCoreBridge` class which:
-  1. Connects to a MeshCore repeater via serial port
-  2. Queries device info (name, public key, private key, radio info, firmware version, board type, stats) via serial commands
-  3. Connects to any number of MQTT brokers simultaneously (each broker has independent config, auth, TLS, and topic settings)
-  4. Reads serial data in a main loop, parses lines with regex (`PACKET_PATTERN`, `RAW_PATTERN`), and publishes JSON to MQTT topics
-  5. Manages reconnection with exponential backoff, WebSocket keep-alive pings, and periodic stats logging (all on background threads)
-  6. Handles remote serial command execution via MQTT (JWT-signed commands from authorized companion devices)
+- **`mctomqtt.py`** — Thin entry point (~45 lines). Keeps `__version__`, argparse, logging setup. Creates `MeshCoreBridge(config, debug, version)` and calls `bridge.run()`.
+
+- **`bridge/`** — Python package containing all application logic, split into focused modules:
+  - **`serial_connection.py`** — `SerialConnection` ABC + `RealSerialConnection` (device I/O with internal locking) + `connect()` factory
+  - **`auth_provider.py`** — `AuthProvider` ABC + `MeshCoreAuthProvider` (wraps `auth_token.py`)
+  - **`broker_client.py`** — `BrokerClient` ABC + `PahoBrokerClient` (wraps paho-mqtt)
+  - **`state.py`** — `BridgeState` shared mutable state container (all ~30 instance variables)
+  - **`topics.py`** — Topic resolution: `get_topic()`, `resolve_topic_template()`, `sanitize_client_id()`
+  - **`mqtt_publish.py`** — `safe_publish()`, `build_status_message()`, `publish_status()`
+  - **`message_parser.py`** — `RAW_PATTERN`, `PACKET_PATTERN`, `parse_and_publish()`
+  - **`remote_serial.py`** — Remote serial command handling, nonce management, JWT validation
+  - **`background.py`** — `stats_logging_loop()`, `websocket_ping_loop()`
+  - **`mqtt_manager.py`** — `MqttManager` class orchestrating broker connections, reconnection, callbacks
+  - **`runner.py`** — `run()` main loop, `handle_signal()`, `wait_for_system_time_sync()`
+  - **`__init__.py`** — `MeshCoreBridge` facade class
 
 - **`auth_token.py`** — Thin wrapper around the `meshcore-decoder` CLI for JWT operations (`create_auth_token`, `verify_auth_token`, `decode_token_payload`). All crypto is delegated to the external Node.js tool via `subprocess.run`.
+
+- **`config_loader.py`** — TOML config loading with layered override system.
+
+### Testability
+
+Three ABC boundaries (`SerialConnection`, `AuthProvider`, `BrokerClient`) allow full control over external dependencies in tests. Fakes are in `tests/fakes.py`:
+- `FakeSerialConnection` — returns canned device values
+- `FakeAuthProvider` — returns deterministic tokens, configurable verify/reject
+- `FakeBrokerClient` — records published messages for assertion
+- `make_test_state()` — factory for `BridgeState` with fake injection
 
 ## Configuration System
 
@@ -68,6 +86,8 @@ See `config.toml.example` for the full reference with all options and defaults.
 /opt/mctomqtt/              # App home (owned by mctomqtt:mctomqtt)
   mctomqtt.py
   auth_token.py
+  config_loader.py
+  bridge/                   # Application package
   .version_info
   venv/                     # Python venv (pyserial, paho-mqtt)
   .nvm/                     # NVM + Node LTS + meshcore-decoder
@@ -80,11 +100,12 @@ See `config.toml.example` for the full reference with all options and defaults.
 
 ## Key Patterns
 
-- **Thread safety:** Serial port access is protected by `self.ser_lock` (threading.Lock). The main loop, stats thread, and remote serial handler all acquire this lock before serial I/O.
-- **MQTT auth:** Two modes per broker — username/password or JWT auth tokens (generated from device's Ed25519 private key via meshcore-decoder). Tokens are cached with TTL.
-- **Graceful shutdown:** SIGTERM/SIGINT handlers set `self.should_exit = True`. The main loop checks this flag each iteration.
-- **Config access:** `self.config` dict with `self.config.get('section', {}).get('key', default)`. Broker configs accessed via `self.config.get('broker', [])` list with 0-based indexing.
-- **Version:** `__version__` is defined at the top of `mctomqtt.py`. The `.version_info` JSON file (created by installer) appends git hash info.
+- **Thread safety:** Serial port access is protected by internal locking in `RealSerialConnection`. The main loop, stats thread, and remote serial handler all call methods on the `SerialConnection` ABC — the lock is never exposed to callers.
+- **MQTT auth:** Two modes per broker — username/password or JWT auth tokens (generated from device's Ed25519 private key via meshcore-decoder). Tokens are cached with TTL. Auth operations go through the `AuthProvider` ABC.
+- **Graceful shutdown:** SIGTERM/SIGINT handlers set `state.should_exit = True`. The main loop checks this flag each iteration.
+- **Config access:** `state.config` dict with `state.config.get('section', {}).get('key', default)`. Broker configs accessed via `topics.get_broker_config(state, broker_idx)`.
+- **Version:** `__version__` is defined at the top of `mctomqtt.py`. The `.version_info` JSON file (created by installer) appends git hash info. Version is passed to `MeshCoreBridge(config, debug, version)`.
+- **Dependency injection:** All external dependencies (serial, MQTT, auth) are abstracted behind ABCs. Tests inject fakes via `make_test_state()` from `tests/fakes.py`.
 - **Installer file operations:** Since the installer runs as root, use Python stdlib directly — `os.makedirs()`, `shutil.copy2()`, `os.chmod()`, `shutil.chown()`, `Path.write_text()`, `shutil.rmtree()`, `Path.unlink()`. Never shell out for file operations. Reserve `run_cmd()` for external tools with no Python equivalent (systemctl, docker, useradd, pip, etc.). All subprocess commands use list form (never `shell=True`).
 
 ## Development Guidelines

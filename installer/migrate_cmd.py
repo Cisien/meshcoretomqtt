@@ -186,9 +186,18 @@ def env_to_toml(env: dict[str, str]) -> str:
 # Migration command
 # ---------------------------------------------------------------------------
 
+def _real_user_home() -> Path:
+    """Get the real user's home directory, even when running under sudo."""
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        import pwd
+        return Path(pwd.getpwnam(sudo_user).pw_dir)
+    return Path.home()
+
+
 def detect_old_installation() -> str | None:
     """Check for legacy ~/.meshcoretomqtt installation. Returns path or None."""
-    old_dir = Path.home() / ".meshcoretomqtt"
+    old_dir = _real_user_home() / ".meshcoretomqtt"
     if old_dir.is_dir() and (old_dir / "mctomqtt.py").exists():
         return str(old_dir)
     return None
@@ -329,7 +338,7 @@ def _stop_old_services(old_dir: str) -> None:
         print_success("Old service stopped and disabled")
 
     if platform.system() == "Darwin":
-        old_plist = Path.home() / "Library" / "LaunchAgents" / "com.meshcore.mctomqtt.plist"
+        old_plist = _real_user_home() / "Library" / "LaunchAgents" / "com.meshcore.mctomqtt.plist"
         if old_plist.exists():
             print_info("Stopping old launchd service...")
             run_cmd(["launchctl", "unload", str(old_plist)], check=False)
@@ -345,7 +354,7 @@ def _cleanup_old_service_units() -> None:
         print_success("Old systemd unit removed")
 
     if platform.system() == "Darwin":
-        old_plist = Path.home() / "Library" / "LaunchAgents" / "com.meshcore.mctomqtt.plist"
+        old_plist = _real_user_home() / "Library" / "LaunchAgents" / "com.meshcore.mctomqtt.plist"
         if old_plist.exists():
             os.unlink(old_plist)
             print_success("Old launchd plist removed")

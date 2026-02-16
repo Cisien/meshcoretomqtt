@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import os
 import platform
-import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import extract_version_from_file
 from .config import configure_mqtt_brokers, update_owner_info, _read_existing_iata, prompt_iata_letsmesh, prompt_iata_simple, _update_iata_in_file
 from .migrate_cmd import detect_old_installation, run_migrate
 from .system import (
@@ -71,12 +71,7 @@ def _do_install(ctx: InstallerContext, tmp_dir: str) -> None:
     shutil.copy2(os.path.join(repo_dir, "mctomqtt.py"), mctomqtt_tmp)
 
     # Extract version
-    for line in Path(mctomqtt_tmp).read_text().splitlines():
-        if line.startswith("__version__"):
-            match = re.search(r'"([^"]+)"', line)
-            if match:
-                ctx.script_version = match.group(1)
-            break
+    ctx.script_version = extract_version_from_file(mctomqtt_tmp)
 
     print_header(f"MeshCore to MQTT Installer v{ctx.script_version}")
     print()
@@ -192,6 +187,7 @@ def _do_install(ctx: InstallerContext, tmp_dir: str) -> None:
         print_info(f"Installing from GitHub ({ctx.repo} @ {ctx.branch})...")
 
     shutil.copy2(os.path.join(repo_dir, "auth_token.py"), os.path.join(tmp_dir, "auth_token.py"))
+    shutil.copy2(os.path.join(repo_dir, "config_loader.py"), os.path.join(tmp_dir, "config_loader.py"))
     shutil.copy2(os.path.join(repo_dir, "config.toml.example"), os.path.join(tmp_dir, "config.toml.example"))
     shutil.copy2(os.path.join(repo_dir, "uninstall.sh"), os.path.join(tmp_dir, "uninstall.sh"))
     for f in ("mctomqtt.service", "com.meshcore.mctomqtt.plist"):
@@ -210,6 +206,14 @@ def _do_install(ctx: InstallerContext, tmp_dir: str) -> None:
     # Install to target directories
     shutil.copy2(mctomqtt_tmp, f"{ctx.install_dir}/")
     shutil.copy2(os.path.join(tmp_dir, "auth_token.py"), f"{ctx.install_dir}/")
+    shutil.copy2(os.path.join(tmp_dir, "config_loader.py"), f"{ctx.install_dir}/")
+    # Copy bridge package
+    bridge_src = os.path.join(repo_dir, "bridge")
+    bridge_dest = os.path.join(ctx.install_dir, "bridge")
+    if os.path.isdir(bridge_src):
+        if os.path.exists(bridge_dest):
+            shutil.rmtree(bridge_dest)
+        shutil.copytree(bridge_src, bridge_dest)
     shutil.copy2(os.path.join(tmp_dir, "uninstall.sh"), f"{ctx.install_dir}/")
     for f in ("mctomqtt.service", "com.meshcore.mctomqtt.plist"):
         src = os.path.join(tmp_dir, f)
@@ -336,7 +340,8 @@ def _print_install_summary(ctx: InstallerContext, migration_done: bool) -> None:
 
     if migration_done:
         print()
-        home = Path.home()
+        from .migrate_cmd import _real_user_home
+        home = _real_user_home()
         print_info(f"Migration note: old installation preserved at {home}/.meshcoretomqtt")
         print_info(f"Remove it once you have verified the new installation: rm -rf {home}/.meshcoretomqtt")
 

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from . import parse_version_tuple
 from .ui import (
     print_error,
     print_header,
@@ -112,9 +113,10 @@ def download_repo_archive(repo: str, branch: str, dest_dir: str) -> str:
 
     os.unlink(zip_path)
 
-    # GitHub archives extract to {repo_name}-{branch}/
+    # GitHub archives extract to {repo_name}-{branch}/ with '/' replaced by '-'
     repo_name = repo.split("/")[-1]
-    extracted_dir = os.path.join(dest_dir, f"{repo_name}-{branch}")
+    branch_sanitized = branch.replace("/", "-")
+    extracted_dir = os.path.join(dest_dir, f"{repo_name}-{branch_sanitized}")
     if not os.path.isdir(extracted_dir):
         # Fallback: find the single extracted directory
         entries = [
@@ -137,15 +139,30 @@ def download_repo_archive(repo: str, branch: str, dest_dir: str) -> str:
 # ---------------------------------------------------------------------------
 
 def prompt_service_user(ctx: InstallerContext) -> str:
-    """Prompt for the service account username and return it."""
-    default = ctx.svc_user
-    # Try to read existing user from systemd unit
-    unit_path = Path("/etc/systemd/system/mctomqtt.service")
-    if unit_path.exists():
-        for line in unit_path.read_text().splitlines():
-            if line.startswith("User="):
-                default = line.split("=", 1)[1].strip()
-                break
+    """Prompt for the service account username and return it.
+
+    Only reads the existing systemd unit's User= if a 1.1+ version_info
+    file exists (meaning the user chose that account in a previous 1.1+
+    install). Pre-1.1 installs ran as the user's own account, so we
+    always default to 'mctomqtt' for those.
+    """
+    default = ctx.svc_user  # "mctomqtt"
+
+    # Only inherit from existing unit if this is a 1.1+ install
+    version_info_path = Path(ctx.install_dir) / ".version_info"
+    if version_info_path.exists():
+        try:
+            info = json.loads(version_info_path.read_text())
+            installed_version = info.get("installer_version", "0")
+            if parse_version_tuple(installed_version) >= (1, 1):
+                unit_path = Path("/etc/systemd/system/mctomqtt.service")
+                if unit_path.exists():
+                    for line in unit_path.read_text().splitlines():
+                        if line.startswith("User="):
+                            default = line.split("=", 1)[1].strip()
+                            break
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass  # Corrupted or unreadable — stick with default
 
     username = prompt_input("Service account username", default)
     # Sanitize: lowercase, strip spaces
@@ -510,7 +527,7 @@ Type=exec
 User={svc_user}
 Group={svc_user}
 WorkingDirectory={install_dir}
-ExecStart={install_dir}/venv/bin/python3 {install_dir}/mctomqtt.py --config {config_dir}/config.toml
+ExecStart={install_dir}/venv/bin/python3 {install_dir}/mctomqtt.py
 Environment="PATH={install_dir}/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="NVM_DIR={install_dir}/.nvm"
 Restart=always
@@ -584,8 +601,6 @@ def install_launchd_service(
     <array>
         <string>{install_dir}/venv/bin/python3</string>
         <string>{install_dir}/mctomqtt.py</string>
-        <string>--config</string>
-        <string>{config_dir}/config.toml</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{install_dir}</string>
@@ -714,6 +729,8 @@ def create_venv(install_dir: str, svc_user: str) -> None:
     shutil.rmtree(venv_dir, ignore_errors=True)
 
     if svc_user:
+        # Ensure install_dir is owned by the service user so venv creation succeeds
+        shutil.chown(install_dir, svc_user, svc_user)
         result = run_cmd(
             ["sudo", "-u", svc_user, "python3", "-m", "venv", venv_dir],
             check=False,
