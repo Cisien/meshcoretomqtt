@@ -57,7 +57,6 @@
       installPhase = ''
         # Install both Python files as modules
         mkdir -p $out/${pkgs.python313.sitePackages}
-        install -Dm644 .env $out/${pkgs.python313.sitePackages}/.env
         install -Dm755 mctomqtt.py $out/${pkgs.python313.sitePackages}/mctomqtt.py
         install -Dm755 auth_token.py $out/${pkgs.python313.sitePackages}/auth_token.py
         # Copy the pre-generated version info file

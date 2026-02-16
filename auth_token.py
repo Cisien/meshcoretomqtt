@@ -55,7 +55,7 @@ def create_auth_token(public_key_hex: str, private_key_hex: str, expiry_seconds:
     except subprocess.TimeoutExpired:
         raise Exception("Token generation timed out")
     except FileNotFoundError:
-        raise Exception("meshcore-decoder CLI not found. Please install: npm install -g @michaelhart/meshcore-decoder")
+        raise Exception("meshcore-decoder CLI not found. Install it with: npm install -g @michaelhart/meshcore-decoder")
     except Exception as e:
         raise Exception(f"Failed to generate auth token: {str(e)}")
 
@@ -112,7 +112,7 @@ def verify_auth_token(token: str, expected_public_key_hex: str = None) -> dict:
     except subprocess.TimeoutExpired:
         raise Exception("Token verification timed out")
     except FileNotFoundError:
-        raise Exception("meshcore-decoder CLI not found. Please install: npm install -g @michaelhart/meshcore-decoder")
+        raise Exception("meshcore-decoder CLI not found. Install it with: npm install -g @michaelhart/meshcore-decoder")
     except json.JSONDecodeError as e:
         raise Exception(f"Failed to parse verification output: {e}")
     except Exception as e:

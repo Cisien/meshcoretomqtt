@@ -1,10 +1,11 @@
 __pycache__/
 .venv/
 .vscode/
-.env.local
-.env.local.backup-*
-mctomqtt.service
+config.toml
+config.d/
 *.log
 output.log
 venv/
 .DS_Store
+.claude/settings.local.json
+.pytest_cache/

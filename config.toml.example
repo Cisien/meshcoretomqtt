@@ -1,0 +1,161 @@
+# =============================================================================
+# MeshCore to MQTT - Configuration Reference
+# =============================================================================
+# This file documents all available configuration options with their defaults.
+#
+# Config loading order (default):
+#   1. /etc/mctomqtt/config.toml          (base defaults, overwritten on updates)
+#   2. /etc/mctomqtt/config.d/*.toml      (drop-in overrides, alphabetical order)
+#
+# Put your customizations in /etc/mctomqtt/config.d/00-user.toml
+#
+# The --config flag bypasses default loading entirely. Multiple --config flags
+# are supported; files are loaded in order, each overlaying the previous.
+# =============================================================================
+
+[general]
+# 3-letter IATA airport code for your geographic region (e.g., SEA, LAX, NYC)
+iata = "XXX"
+
+# Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_level = "INFO"
+
+# Wait for system clock sync (via timedatectl) before setting repeater time
+sync_time = true
+
+[serial]
+# Serial ports to try connecting to (first successful port is used)
+ports = ["/dev/ttyACM0"]
+
+# Serial baud rate
+baud_rate = 115200
+
+# Serial read timeout in seconds
+timeout = 2
+
+[topics]
+# Topic templates - supported variables: {IATA}, {PUBLIC_KEY}
+status = "meshcore/{IATA}/{PUBLIC_KEY}/status"
+packets = "meshcore/{IATA}/{PUBLIC_KEY}/packets"
+debug = "meshcore/{IATA}/{PUBLIC_KEY}/debug"
+raw = "meshcore/{IATA}/{PUBLIC_KEY}/raw"
+
+[remote_serial]
+# Enable remote serial command execution via MQTT
+# Allows remote execution of serial commands on your node via the LetsMesh.net
+# MeshCore Packet Analyzer web interface. Commands are cryptographically signed
+# by an authorized companion device.
+#
+# Security model:
+#   - Commands must be signed with an Ed25519 private key
+#   - Only companions in the allowlist can send commands
+#   - Each command JWT has a 30-second expiry (checked against system clock)
+#   - Nonces prevent replay attacks
+#   - Responses are signed by the node's private key for verification
+#
+# Note: Ensure your system clock is synchronized (NTP) for JWT expiry checks.
+enabled = false
+
+# Companion public keys authorized to send commands (64 hex chars each)
+allowed_companions = []
+
+# Nonce TTL in seconds - how long to track nonces for replay protection
+nonce_ttl = 120
+
+# Command timeout in seconds - how long to wait for serial response
+command_timeout = 10
+
+# Commands that are blocked for security reasons (case-insensitive prefix match)
+disallowed_commands = ["get prv.key", "set prv.key", "erase", "password"]
+
+[update]
+# Source repository and branch for updates
+repo = "Cisien/meshcoretomqtt"
+branch = "main"
+
+# =============================================================================
+# MQTT Brokers
+# =============================================================================
+# Each [[broker]] block defines an MQTT broker connection.
+# Brokers are identified by "name" for merging in override files.
+#
+# Auth methods:
+#   "password" - username/password authentication
+#   "token"    - MeshCore auth token (requires meshcore-decoder)
+#   "none"     - anonymous connection
+
+# --- LetsMesh US broker with auth token ---
+[[broker]]
+name = "letsmesh-us"
+enabled = true
+server = "mqtt-us-v1.letsmesh.net"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt-us-v1.letsmesh.net"
+# owner: public key of the owner's MeshCore companion device (64 hex chars)
+owner = ""
+# email: your LetsMesh.net account email address
+email = ""
+
+# --- LetsMesh EU broker with auth token ---
+[[broker]]
+name = "letsmesh-eu"
+enabled = true
+server = "mqtt-eu-v1.letsmesh.net"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt-eu-v1.letsmesh.net"
+# owner: public key of the owner's MeshCore companion device (64 hex chars)
+owner = ""
+# email: your LetsMesh.net account email address
+email = ""
+
+# =============================================================================
+# Example: Local MQTT broker with username/password
+# =============================================================================
+# Uncomment and configure to add a local broker.
+
+# [[broker]]
+# name = "local-mqtt"
+# enabled = true
+# server = "mqtt.local"
+# port = 1883
+# transport = "tcp"          # "tcp" or "websockets"
+# keepalive = 60
+# client_id_prefix = "meshcore_"
+# qos = 0
+# retain = true
+#
+# [broker.tls]
+# enabled = false
+# verify = true
+#
+# [broker.auth]
+# method = "password"        # "password", "token", or "none"
+# username = "user"
+# password = "pass"
+#
+# Per-broker topic overrides (optional)
+# [broker.topics]
+# status = "custom/{IATA}/{PUBLIC_KEY}/status"
+# iata = "LAX"

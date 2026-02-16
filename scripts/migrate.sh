@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
-# MeshCore to MQTT - Installer Bootstrap
-# Downloads the Python installer package and runs `python3 -m installer install`
+# MeshCore to MQTT - Migration Bootstrap
+# Downloads the Python installer package and runs `python3 -m installer migrate`
 # ============================================================================
 set -e
 
@@ -55,8 +55,8 @@ else
     cp -r "$TMP_DIR/$REPO_NAME-$BRANCH/installer" "$TMP_DIR/installer"
 fi
 
-# Run Python installer
+# Run Python migrator
 export INSTALL_REPO="$REPO"
 export INSTALL_BRANCH="$BRANCH"
 cd "$TMP_DIR"
-python3 -m installer install --repo "$REPO" --branch "$BRANCH" "${EXTRA_ARGS[@]}"
+python3 -m installer migrate --repo "$REPO" --branch "$BRANCH" "${EXTRA_ARGS[@]}"

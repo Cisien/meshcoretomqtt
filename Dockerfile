@@ -1,7 +1,7 @@
 # Basic container
-# Example usage: 
+# Example usage:
 #   docker run -d --name mctomqtt \
-#     -v ./config/.env.local:/opt/.env.local \
+#     -v ./config.toml:/etc/mctomqtt/config.toml \
 #     --device=/dev/ttyACM0 \
 #     meshcoretomqtt:latest
 
@@ -36,10 +36,15 @@ RUN apk add --no-cache \
 # Copy the entire Node structure from builder to ensure symlinks and paths remain valid
 COPY --from=builder /usr/local /usr/local
 # Copy application files
-COPY ./mctomqtt.py ./auth_token.py ./.env /opt/
+COPY ./mctomqtt.py ./auth_token.py /opt/
 
-# Note: .env.local should be mounted as a volume with your configuration
-# The .env file contains defaults, .env.local contains your overrides
-# Example: -v /path/to/.env.local:/opt/.env.local
+# Create config directory and copy default config
+RUN mkdir -p /etc/mctomqtt/config.d
+COPY ./config.toml.example /etc/mctomqtt/config.toml
 
-CMD ["python3", "/opt/mctomqtt.py"]
+# Note: Mount your config as a volume:
+#   -v /path/to/config.toml:/etc/mctomqtt/config.toml
+# Or mount a drop-in override:
+#   -v /path/to/00-user.toml:/etc/mctomqtt/config.d/00-user.toml
+
+CMD ["python3", "/opt/mctomqtt.py", "--config", "/etc/mctomqtt/config.toml"]

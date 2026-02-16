@@ -21,26 +21,14 @@ message hits!
 curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | bash
 ```
 
-### Pre-Configuration from URL
+The installer will:
 
-Use a hosted configuration file for quick setup:
-
-```bash
-# Example: Local broker + LetsMesh.net Packet Analyzer MQTT server
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | \
-  bash -s -- --config https://gist.githubusercontent.com/username/abc123/raw/my-config.env
-```
-
-This is useful for deploying multiple nodes with the same configuration.
-
-### Custom Configuration URL
-
-Use your own configuration (Gist, repo, etc.):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | \
-  bash -s -- --config https://gist.githubusercontent.com/username/abc123/raw/my-config.env
-```
+- Create a dedicated `mctomqtt` system user
+- Install to `/opt/mctomqtt/` with config at `/etc/mctomqtt/`
+- Guide you through interactive MQTT broker configuration
+- Set up Python virtual environment (requires Python 3.11+)
+- Configure a systemd service (Linux) or launchd daemon (macOS)
+- Auto-detect and migrate existing `~/.meshcoretomqtt` installations
 
 ### Custom Repository/Branch
 
@@ -51,18 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/yourusername/meshcoretomqtt/yourbra
   bash -s -- --repo yourusername/meshcoretomqtt --branch yourbranch
 ```
 
-The installer will:
-
-- Guide you through interactive configuration (or use provided config)
-- Set up Python virtual environment
-- Configure one or multiple MQTT brokers
-- Choose installation method: system service, Docker container, or manual
-- Handle both Linux (systemd) and macOS (launchd)
-- Auto-detect and update existing installations
-
 ### Local Testing
-
-If you want to test the installer locally:
 
 ```bash
 git clone https://github.com/Cisien/meshcoretomqtt
@@ -71,8 +48,6 @@ LOCAL_INSTALL=$(pwd) ./install.sh
 ```
 
 ### NixOS
-
-Use this flake with NixOS this way.
 
 flake.nix
 
@@ -92,7 +67,7 @@ services.mctomqtt = {
     serialPorts = ["/dev/ttyUSB0"];
 
     # Disable defaults if you like.
-    # Defaults are use if nothing is specified
+    # Defaults are used if nothing is specified
     defaults = {
         letsmesh-us.enable = true;
         letsmesh-eu.enable = true;
@@ -101,18 +76,20 @@ services.mctomqtt = {
     # Define custom brokers if you need them
     brokers = [
       {
+        name = "my-broker";
         enabled = true;
         server = "mqtt.example.com";
         port = 1883;
-        use-tls = true;
-        use-auth-token = true;
-        username = "my_username";
-        password = "my_password";
+        tls.enabled = true;
+        auth = {
+          method = "password";
+          username = "my_username";
+          password = "my_password";
+        };
       }
     ];
 
     # Additional settings
-    # foo-bar becomes MCTOMQTT_FOO_BAR
     settings = {
       log-level = "DEBUG";
     };
@@ -142,104 +119,152 @@ services.mctomqtt = {
 
 ### Software Requirements
 
-- Python 3.7 or higher
+- Python 3.11 or higher (required for `tomllib` stdlib module)
 - For auth token support (optional): Node.js and `@michaelhart/meshcore-decoder`
 
 The installer handles these dependencies automatically!
 
+## Directory Layout
+
+```
+/opt/mctomqtt/              # App home (owned by mctomqtt:mctomqtt)
+  mctomqtt.py
+  auth_token.py
+  .version_info
+  venv/                     # Python venv (pyserial, paho-mqtt)
+  .nvm/                     # NVM + Node LTS + meshcore-decoder
+
+/etc/mctomqtt/              # Config (owned root:mctomqtt, 750)
+  config.toml               # Defaults (640, OVERWRITTEN on updates)
+  config.d/                 # Drop-in override directory
+    00-user.toml               # User config (640, never overwritten)
+```
+
 ## Configuration
 
-Configuration uses environment files (`.env` and `.env.local`):
+Configuration uses TOML files with a layered override system:
 
-- `.env` - Contains default values (don't edit, will be overwritten on updates)
-- `.env.local` - Your custom configuration (gitignored, never overwritten)
+- `/etc/mctomqtt/config.toml` — Default values (overwritten on updates, do not edit)
+- `/etc/mctomqtt/config.d/00-user.toml` — Your custom configuration (never overwritten)
 
-### Manual Configuration
+Files in `config.d/` are loaded alphabetically and deep-merged over the defaults.
 
-If you need to manually edit configuration after installation:
+To bypass the default config loading entirely, use `--config`:
 
 ```bash
-# Edit your local configuration
-nano ~/.meshcoretomqtt/.env.local
+mctomqtt.py --config /path/to/config.toml
+mctomqtt.py --config /path/to/base.toml --config /path/to/overrides.toml
 ```
 
-#### Basic Example (.env.local)
+When `--config` is used, `/etc/mctomqtt/` is not read. Multiple `--config` flags are supported; files are loaded in order with later files overlaying earlier ones.
+
+### Editing Configuration
 
 ```bash
-# Serial Configuration
-MCTOMQTT_SERIAL_PORTS=/dev/ttyACM0
-
-# Global IATA Code (3-letter airport code for your location)
-MCTOMQTT_IATA=SEA
-
-# MQTT Broker 1 - Username/Password
-MCTOMQTT_MQTT1_ENABLED=true
-MCTOMQTT_MQTT1_SERVER=mqtt.example.com
-MCTOMQTT_MQTT1_PORT=1883
-MCTOMQTT_MQTT1_USERNAME=my_username
-MCTOMQTT_MQTT1_PASSWORD=my_password
+sudo nano /etc/mctomqtt/config.d/00-user.toml
 ```
 
-#### Advanced Example with Multiple Brokers
+### Basic Example (00-user.toml)
 
-```bash
-# Serial Configuration
-MCTOMQTT_SERIAL_PORTS=/dev/ttyACM0
-MCTOMQTT_IATA=SEA
+```toml
+[general]
+iata = "SEA"
 
-# Broker 1 - Local MQTT with Username/Password
-MCTOMQTT_MQTT1_ENABLED=true
-MCTOMQTT_MQTT1_SERVER=mqtt.local
-MCTOMQTT_MQTT1_PORT=1883
-MCTOMQTT_MQTT1_USERNAME=localuser
-MCTOMQTT_MQTT1_PASSWORD=localpass
+[serial]
+ports = ["/dev/ttyACM0"]
 
-# Broker 2 - Public Observer Network with Auth Token
-MCTOMQTT_MQTT2_ENABLED=true
-MCTOMQTT_MQTT2_SERVER=mqtt-us-v1.letsmesh.net
-MCTOMQTT_MQTT2_PORT=443
-MCTOMQTT_MQTT2_TRANSPORT=websockets
-MCTOMQTT_MQTT2_USE_TLS=true
-MCTOMQTT_MQTT2_USE_AUTH_TOKEN=true
-MCTOMQTT_MQTT2_TOKEN_AUDIENCE=mqtt-us-v1.letsmesh.net
+[[broker]]
+name = "my-mqtt"
+enabled = true
+server = "mqtt.example.com"
+port = 1883
+
+[broker.auth]
+method = "password"
+username = "my_username"
+password = "my_password"
+```
+
+### Advanced Example with Multiple Brokers
+
+```toml
+[general]
+iata = "SEA"
+
+[serial]
+ports = ["/dev/ttyACM0"]
+
+# Local MQTT with Username/Password
+[[broker]]
+name = "local-mqtt"
+enabled = true
+server = "mqtt.local"
+port = 1883
+
+[broker.auth]
+method = "password"
+username = "localuser"
+password = "localpass"
+
+# LetsMesh.net Packet Analyzer (US)
+[[broker]]
+name = "letsmesh-us"
+enabled = true
+server = "mqtt-us-v1.letsmesh.net"
+port = 443
+transport = "websockets"
+
+[broker.tls]
+enabled = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt-us-v1.letsmesh.net"
 ```
 
 ### Topic Templates
 
 Topics support template variables:
 
-- `{IATA}` - Your 3-letter location code
-- `{PUBLIC_KEY}` - Device public key (auto-detected)
+- `{IATA}` — Your 3-letter location code
+- `{PUBLIC_KEY}` — Device public key (auto-detected)
 
-**Global topics** (apply to all brokers by default):
+**Global topics** (in config.toml defaults):
 
-```bash
-MCTOMQTT_TOPIC_STATUS=meshcore/{IATA}/{PUBLIC_KEY}/status
-MCTOMQTT_TOPIC_PACKETS=meshcore/{IATA}/{PUBLIC_KEY}/packets
-MCTOMQTT_TOPIC_DEBUG=meshcore/{IATA}/{PUBLIC_KEY}/debug
+```toml
+[topics]
+status = "meshcore/{IATA}/{PUBLIC_KEY}/status"
+packets = "meshcore/{IATA}/{PUBLIC_KEY}/packets"
+debug = "meshcore/{IATA}/{PUBLIC_KEY}/debug"
 ```
 
 **Per-broker topic overrides** (optional):
 
-```bash
-# Broker 2 uses different topic structure
-MCTOMQTT_MQTT2_TOPIC_STATUS=custom/{IATA}/{PUBLIC_KEY}/status
-MCTOMQTT_MQTT2_TOPIC_PACKETS=custom/{IATA}/{PUBLIC_KEY}/data
-MCTOMQTT_MQTT2_IATA=LAX  # Different IATA code for this broker
-```
+```toml
+[[broker]]
+name = "custom-broker"
+enabled = true
+server = "mqtt.example.com"
 
-This allows sending the same data to multiple brokers with different topic
-structures.
+[broker.topics]
+status = "custom/{IATA}/{PUBLIC_KEY}/status"
+iata = "LAX"
+```
 
 ## Authentication Methods
 
 ### 1. Username/Password
 
-```bash
-MCTOMQTT_MQTT1_ENABLED=true
-MCTOMQTT_MQTT1_SERVER=mqtt.example.com
-MCTOMQTT_MQTT1_USERNAME=your_username
-MCTOMQTT_MQTT1_PASSWORD=your_password
+```toml
+[[broker]]
+name = "my-broker"
+enabled = true
+server = "mqtt.example.com"
+
+[broker.auth]
+method = "password"
+username = "your_username"
+password = "your_password"
 ```
 
 ### 2. Auth Token (Public Key Based)
@@ -247,11 +272,20 @@ MCTOMQTT_MQTT1_PASSWORD=your_password
 Requires `@michaelhart/meshcore-decoder` and firmware supporting `get prv.key`
 command.
 
-```bash
-MCTOMQTT_MQTT1_ENABLED=true
-MCTOMQTT_MQTT1_SERVER=mqtt-us-v1.letsmesh.net
-MCTOMQTT_MQTT1_USE_AUTH_TOKEN=true
-MCTOMQTT_MQTT1_TOKEN_AUDIENCE=mqtt-us-v1.letsmesh.net
+```toml
+[[broker]]
+name = "letsmesh-us"
+enabled = true
+server = "mqtt-us-v1.letsmesh.net"
+port = 443
+transport = "websockets"
+
+[broker.tls]
+enabled = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt-us-v1.letsmesh.net"
 ```
 
 The script will:
@@ -274,19 +308,20 @@ npm install -g @michaelhart/meshcore-decoder
 
 ### Additional Settings
 
-```bash
+```toml
+[general]
 # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
-MCTOMQTT_LOG_LEVEL=INFO
+log_level = "INFO"
 
 # Wait for system clock sync before setting repeater time (default: true)
 # Set to false on systems without timedatectl or NTP
-MCTOMQTT_SYNC_TIME=true
+sync_time = true
 ```
 
 ### Remote Serial (LetsMesh.net Experimental)
 
-Remote serial allows you to execute serial commands on your node remotely via 
-the LetsMesh.net MeshCore Packet Analyzer web interface. Commands are cryptographically 
+Remote serial allows you to execute serial commands on your node remotely via
+the LetsMesh.net MeshCore Packet Analyzer web interface. Commands are cryptographically
 signed by an authorized companion device connected via Bluetooth.
 
 **Security Model:**
@@ -298,19 +333,14 @@ signed by an authorized companion device connected via Bluetooth.
 
 **Configuration:**
 
-```bash
-# Enable remote serial feature
-MCTOMQTT_REMOTE_SERIAL_ENABLED=true
-
-# Comma-separated list of companion public keys (64 hex chars each)
-# These are the devices authorized to send commands to this node
-MCTOMQTT_REMOTE_SERIAL_ALLOWED_COMPANIONS=03CEBEA...
-
-# Nonce TTL in seconds (default: 120) - how long to track nonces for replay protection
-MCTOMQTT_REMOTE_SERIAL_NONCE_TTL=120
-
-# Command timeout in seconds (default: 10) - how long to wait for serial response
-MCTOMQTT_REMOTE_SERIAL_COMMAND_TIMEOUT=10
+```toml
+[remote_serial]
+enabled = true
+allowed_companions = [
+    "03CEBEA3DA9C279CF8EB9449F0CC5BA3690621EE66A3B91067CDBA881EC883A5"
+]
+nonce_ttl = 120
+command_timeout = 10
 ```
 
 **How it works:**
@@ -329,7 +359,7 @@ The installer offers three deployment options:
 
 ### 1. System Service (Recommended)
 
-Automatically starts on boot and runs in the background.
+Automatically starts on boot and runs as a dedicated system user.
 
 **Linux (systemd):**
 
@@ -344,19 +374,13 @@ sudo journalctl -u mctomqtt -f     # View logs
 **macOS (launchd):**
 
 ```bash
-launchctl start com.meshcore.mctomqtt    # Start service
-launchctl stop com.meshcore.mctomqtt     # Stop service
-launchctl list | grep mctomqtt           # Check status
-tail -f ~/Library/Logs/mctomqtt.log      # View logs
+sudo launchctl load /Library/LaunchDaemons/com.meshcore.mctomqtt.plist
+sudo launchctl unload /Library/LaunchDaemons/com.meshcore.mctomqtt.plist
+sudo launchctl list | grep mctomqtt
+tail -f /var/log/mctomqtt.log
 ```
 
 ### 2. Docker Container
-
-Isolated containerized deployment with automatic restarts.
-
-#### Manual Docker Setup
-
-If you prefer to run Docker manually without the installer:
 
 ```bash
 # Build the image
@@ -366,38 +390,39 @@ docker build -t mctomqtt:latest /path/to/meshcoretomqtt
 docker run -d \
   --name mctomqtt \
   --restart unless-stopped \
-  -v ~/.meshcoretomqtt/.env.local:/opt/.env.local \
+  -v /path/to/config.toml:/etc/mctomqtt/config.toml \
   --device=/dev/ttyACM0 \
   mctomqtt:latest
 ```
 
 ### 3. Manual Execution
 
-Run directly without service management.
-
 ```bash
-cd ~/.meshcoretomqtt
-./venv/bin/python3 mctomqtt.py
+cd /opt/mctomqtt
+sudo -u mctomqtt ./venv/bin/python3 mctomqtt.py --config /etc/mctomqtt/config.toml
 ```
 
 With debug output:
 
 ```bash
-./venv/bin/python3 mctomqtt.py -debug
+sudo -u mctomqtt ./venv/bin/python3 mctomqtt.py --config /etc/mctomqtt/config.toml --debug
 ```
 
 ## Updates
 
-### Automatic Updates
+Use the standalone update script for the simplest update experience:
 
-Simply re-run the installer - it will detect your existing installation and
-offer to update:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/scripts/update.sh | bash
+```
+
+Or re-run the installer — it will detect your existing installation and offer to update:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | bash
 ```
 
-Or for non-interactive updates (useful for scripts/automation):
+For non-interactive updates:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | bash -s -- --update
@@ -408,41 +433,23 @@ The updater will:
 - Detect your existing service type (systemd/launchd/Docker)
 - Stop the service/container
 - Download and verify updated files
-- Preserve your `.env.local` configuration
+- Overwrite `/etc/mctomqtt/config.toml` with latest defaults
+- Preserve your `/etc/mctomqtt/config.d/00-user.toml` configuration
 - Restart the service/container automatically
 
-### Custom Repository Updates
+## Migration
 
-Install from a specific repo/branch:
-
-```bash
-# Using environment variables
-INSTALL_REPO=yourusername/meshcoretomqtt INSTALL_BRANCH=yourbranch bash <(curl -fsSL https://raw.githubusercontent.com/yourusername/meshcoretomqtt/yourbranch/install.sh)
-
-# Or using flags
-curl -fsSL https://raw.githubusercontent.com/yourusername/meshcoretomqtt/yourbranch/install.sh | \
-  bash -s -- --repo yourusername/meshcoretomqtt --branch yourbranch
-```
-
-### Local Updates
-
-If you've cloned the repository:
+If you have a legacy `~/.meshcoretomqtt` installation, migrate to the new layout:
 
 ```bash
-cd meshcoretomqtt
-LOCAL_INSTALL=$(pwd) ./install.sh
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/scripts/migrate.sh | bash
 ```
 
-## Reconfiguration
+The migrator will:
 
-To reconfigure without updating, either:
-
-1. **Interactive:** Re-run the installer and select "Reconfigure" when prompted
-2. **Manual:** Edit `.env.local` directly and restart the service:
-   ```bash
-   nano ~/.meshcoretomqtt/.env.local
-   # Then restart: sudo systemctl restart mctomqtt (or docker restart mctomqtt)
-   ```
+- Convert `.env`/`.env.local` configuration to TOML format
+- Stop and remove old systemd/launchd services
+- Preserve the old installation directory for manual cleanup
 
 ## Uninstallation
 
@@ -450,77 +457,20 @@ To reconfigure without updating, either:
 curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/uninstall.sh | bash
 ```
 
-Or locally:
-
-```bash
-cd ~/.meshcoretomqtt
-./uninstall.sh
-```
-
 The uninstaller will:
 
 - Stop and remove the service
-- Offer to backup your `.env.local`
-- Prompt before removing configuration
-- Clean up all installed files
-
-## Manual Docker Installation
-
-The installer can set up Docker automatically (option 2 during installation).
-For manual Docker setup:
-
-1. Create a configuration directory:
-
-```bash
-mkdir -p ~/mctomqtt-config
-```
-
-2. Create your `.env.local` in the config directory:
-
-```bash
-cat > ~/mctomqtt-config/.env.local << 'EOF'
-MCTOMQTT_SERIAL_PORTS=/dev/ttyACM0
-MCTOMQTT_IATA=SEA
-MCTOMQTT_MQTT1_ENABLED=true
-MCTOMQTT_MQTT1_SERVER=mqtt.example.com
-MCTOMQTT_MQTT1_USERNAME=user
-MCTOMQTT_MQTT1_PASSWORD=pass
-EOF
-```
-
-3. Build and run:
-
-```bash
-docker build -t mctomqtt:latest .
-docker run -d --name mctomqtt \
-  -v ~/mctomqtt-config/.env.local:/opt/.env.local \
-  --device=/dev/ttyACM0 \
-  --restart unless-stopped \
-  mctomqtt:latest
-```
-
-Note: Instead of `/dev/ttyACM0` or similar, you can run
-`ls /dev/serial/by-id/ -al` to find the correct device and a more consistent
-device reference.
-
-4. View logs:
-
-```bash
-docker logs -f mctomqtt
-```
-
-**Note:** The installer handles all of this automatically, including interactive
-configuration!
+- Offer to backup your `00-user.toml` configuration
+- Remove `/opt/mctomqtt/` and `/etc/mctomqtt/`
+- Remove the `mctomqtt` system user
 
 ## Privacy
 
 This tool collects and forwards all packets transmitted over the MeshCore
-network. MeshCore does not currently have any privacy controls baked into the
-protocol to designate whether a user would like their data logged
-([#435](https://github.com/ripplebiz/MeshCore/issues/435)). Privacy on MeshCore
-is provided by protecting secret channel keys - only packets encrypted with
-known channel keys can be decrypted and read. Packets on channels where you
-don't have the key will be forwarded as encrypted data.
+network. Privacy on MeshCore is provided by protecting secret channel 
+keys. All packets will be forwarded as raw data without additional processing
+or decryption. The primary use of this script is to send data to LetsMesh.net.
+Learn at https://letsmesh.net/
 
 ## Viewing the data
 
@@ -561,5 +511,4 @@ Topic: meshcore/packets QoS: 0
 
 ## ToDo
 
-- Complete more thorough testing
 - Fix bugs with keepalive status topic
