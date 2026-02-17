@@ -136,10 +136,10 @@ The installer handles these dependencies automatically!
   venv/                     # Python venv (pyserial, paho-mqtt)
   .nvm/                     # NVM + Node LTS + meshcore-decoder
 
-/etc/mctomqtt/              # Config (owned root:mctomqtt, 750)
-  config.toml               # Defaults (640, OVERWRITTEN on updates)
+/etc/mctomqtt/              # Config (owned root:mctomqtt, 755)
+  config.toml               # Defaults (644, OVERWRITTEN on updates)
   config.d/                 # Drop-in override directory
-    00-user.toml               # User config (640, never overwritten)
+    00-user.toml               # User config (644, never overwritten)
 ```
 
 ## Configuration

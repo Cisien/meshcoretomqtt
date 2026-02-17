@@ -611,7 +611,7 @@ def configure_mqtt_brokers(ctx: InstallerContext) -> None:
     if platform.system() != "Darwin" and ctx.svc_user:
         import shutil as _shutil
         _shutil.chown(user_toml, "root", ctx.svc_user)
-        os.chmod(user_toml, 0o640)
+        os.chmod(user_toml, 0o644)
 
 
 def _configure_iata_simple(user_toml: str) -> None:

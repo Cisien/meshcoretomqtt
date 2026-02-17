@@ -207,22 +207,22 @@ def set_permissions(install_dir: str, config_dir: str, svc_user: str) -> None:
     chown_recursive(install_dir, svc_user, svc_user)
     print_success(f"{install_dir} owned by {svc_user}:{svc_user}")
 
-    # /etc/mctomqtt owned by root:svc_user, mode 750
+    # /etc/mctomqtt owned by root:svc_user, mode 755 (world-readable)
     chown_recursive(config_dir, "root", svc_user)
-    os.chmod(config_dir, 0o750)
+    os.chmod(config_dir, 0o755)
     config_d = Path(config_dir) / "config.d"
     if config_d.exists():
-        os.chmod(str(config_d), 0o750)
+        os.chmod(str(config_d), 0o755)
 
     config_toml = Path(config_dir) / "config.toml"
     if config_toml.exists():
-        os.chmod(str(config_toml), 0o640)
+        os.chmod(str(config_toml), 0o644)
 
     user_toml = Path(config_dir) / "config.d" / "00-user.toml"
     if user_toml.exists():
-        os.chmod(str(user_toml), 0o640)
+        os.chmod(str(user_toml), 0o644)
 
-    print_success(f"Permissions set on {config_dir} (root:{svc_user}, 750/640)")
+    print_success(f"Permissions set on {config_dir} (root:{svc_user}, 755/644)")
 
 
 # ---------------------------------------------------------------------------
