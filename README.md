@@ -18,7 +18,7 @@ message hits!
 ### One-Line Installation (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | sudo bash
 ```
 
 The installer will:
@@ -36,7 +36,7 @@ Install from a fork or custom branch:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yourusername/meshcoretomqtt/yourbranch/install.sh | \
-  bash -s -- --repo yourusername/meshcoretomqtt --branch yourbranch
+  sudo bash -s -- --repo yourusername/meshcoretomqtt --branch yourbranch
 ```
 
 ### Local Testing
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/yourusername/meshcoretomqtt/yourbra
 ```bash
 git clone https://github.com/Cisien/meshcoretomqtt
 cd meshcoretomqtt
-LOCAL_INSTALL=$(pwd) ./install.sh
+sudo LOCAL_INSTALL=$(pwd) ./install.sh
 ```
 
 ### NixOS
@@ -53,7 +53,7 @@ flake.nix
 
 ```nix
 inputs = {
-  meshcoretomqtt.url = "github:github.com/Cisien/meshcoretomqtt"
+  meshcoretomqtt.url = "github:Cisien/meshcoretomqtt"
 };
 ```
 
@@ -128,8 +128,10 @@ The installer handles these dependencies automatically!
 
 ```
 /opt/mctomqtt/              # App home (owned by mctomqtt:mctomqtt)
-  mctomqtt.py
+  mctomqtt.py               # Entry point
+  bridge/                   # Core bridge package
   auth_token.py
+  config_loader.py
   .version_info
   venv/                     # Python venv (pyserial, paho-mqtt)
   .nvm/                     # NVM + Node LTS + meshcore-decoder
@@ -413,19 +415,19 @@ sudo -u mctomqtt ./venv/bin/python3 mctomqtt.py --config /etc/mctomqtt/config.to
 Use the standalone update script for the simplest update experience:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/scripts/update.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/scripts/update.sh | sudo bash
 ```
 
 Or re-run the installer — it will detect your existing installation and offer to update:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | sudo bash
 ```
 
 For non-interactive updates:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | bash -s -- --update
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/install.sh | sudo bash -s -- --update
 ```
 
 The updater will:
@@ -442,7 +444,7 @@ The updater will:
 If you have a legacy `~/.meshcoretomqtt` installation, migrate to the new layout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/scripts/migrate.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/scripts/migrate.sh | sudo bash
 ```
 
 The migrator will:
@@ -454,7 +456,7 @@ The migrator will:
 ## Uninstallation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/uninstall.sh | sudo bash
 ```
 
 The uninstaller will:
@@ -498,17 +500,14 @@ the LoRa packet.
 Flood packet...
 
 ```
-Topic: meshcore/packets QoS: 0
-{"origin": "ag loft rpt", "timestamp": "2025-03-16T00:07:11.191561", "type": "PACKET", "direction": "rx", "time": "00:07:09", "date": "16/3/2025", "len": "87", "packet_type": "5", "route": "F", "payload_len": "83", "SNR": "4", "RSSI": "-93", "score": "1000", "hash": "AC9D2DDDD8395712"}
+Topic: meshcore/SEA/A1B2.../packets QoS: 0
+{"origin": "ag loft rpt", "origin_id": "A1B2...", "timestamp": "2025-03-16T00:07:11.191561", "type": "PACKET", "direction": "rx", "time": "00:07:09", "date": "16/3/2025", "len": "87", "packet_type": "5", "route": "F", "payload_len": "83", "raw": "0A1B2C...", "SNR": "4", "RSSI": "-93", "score": "1000", "hash": "AC9D2DDDD8395712"}
 ```
 
 Direct packet...
 
 ```
-Topic: meshcore/packets QoS: 0
-{"origin": "ag loft rpt", "timestamp": "2025-03-15T23:09:00.710459", "type": "PACKET", "direction": "rx", "time": "23:08:59", "date": "15/3/2025", "len": "22", "packet_type": "2", "route": "D", "payload_len": "20", "SNR": "5", "RSSI": "-93", "score": "1000", "hash": "890BFA3069FD1250", "path": "C2 -> E2"}
+Topic: meshcore/SEA/A1B2.../packets QoS: 0
+{"origin": "ag loft rpt", "origin_id": "A1B2...", "timestamp": "2025-03-15T23:09:00.710459", "type": "PACKET", "direction": "rx", "time": "23:08:59", "date": "15/3/2025", "len": "22", "packet_type": "2", "route": "D", "payload_len": "20", "raw": "0A1B2C...", "SNR": "5", "RSSI": "-93", "score": "1000", "hash": "890BFA3069FD1250", "path": "C2 -> E2"}
 ```
 
-## ToDo
-
-- Fix bugs with keepalive status topic
