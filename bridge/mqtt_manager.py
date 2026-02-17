@@ -58,6 +58,7 @@ class MqttManager:
             client_info = self._create_and_connect_broker(i)
             if client_info:
                 state.mqtt_clients.append(client_info)
+                client_info['client'].loop_start()
 
         if len(state.mqtt_clients) == 0:
             logger.error("[MQTT] Failed to connect to any broker")
@@ -126,6 +127,7 @@ class MqttManager:
 
             if new_client_info:
                 state.mqtt_clients[i] = new_client_info
+                new_client_info['client'].loop_start()
                 logger.debug(f"[{broker_name}] Recreated client successfully")
             else:
                 mqtt_info['failed_attempts'] = failed_attempts + 1
@@ -153,9 +155,6 @@ class MqttManager:
         state = self.state
         broker_name = userdata.get('name', 'unknown') if userdata else 'unknown'
         broker_idx = userdata.get('broker_idx', None) if userdata else None
-
-        if broker_idx in state.connection_events:
-            state.connection_events[broker_idx].set()
 
         if rc == 0:
             state.reconnect_delay = 1.0
@@ -206,6 +205,9 @@ class MqttManager:
             remote_serial.subscribe_serial_commands(state, broker_client, broker_idx)
         else:
             logger.error(f"[{broker_name}] Connection failed with code: {rc}")
+
+        if broker_idx in state.connection_events:
+            state.connection_events[broker_idx].set()
 
     def on_mqtt_disconnect(self, client: Any, userdata: dict[str, Any] | None, disconnect_flags: Any, reason_code: Any, properties: Any) -> None:
         state = self.state
@@ -432,7 +434,6 @@ class MqttManager:
 
         try:
             broker_client.connect(server, port, keepalive=keepalive)
-            broker_client.loop_start()
 
             if transport == "websockets":
                 state.ws_ping_threads[broker_idx] = {'active': True}
