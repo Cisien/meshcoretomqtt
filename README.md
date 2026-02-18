@@ -49,6 +49,12 @@ sudo LOCAL_INSTALL=$(pwd) ./install.sh
 
 ### NixOS
 
+configuration.nix:
+
+```nix
+{ config, pkgs, meshcoretomqtt, ... }:
+```
+
 flake.nix
 
 ```nix
