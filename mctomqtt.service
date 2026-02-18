@@ -1,0 +1,23 @@
+[Unit]
+Description=MeshCore to MQTT Relay
+After=time-sync.target network-online.target
+Wants=time-sync.target network-online.target
+
+[Service]
+Type=exec
+User=mctomqtt
+Group=mctomqtt
+WorkingDirectory=/opt/mctomqtt
+ExecStart=/opt/mctomqtt/venv/bin/python3 /opt/mctomqtt/mctomqtt.py
+Environment="PATH=/opt/mctomqtt/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="NVM_DIR=/opt/mctomqtt/.nvm"
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mctomqtt
+
+[Install]
+WantedBy=multi-user.target

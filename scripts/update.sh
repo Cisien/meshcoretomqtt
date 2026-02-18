@@ -1,13 +1,33 @@
 #!/bin/bash
 # ============================================================================
-# MeshCore to MQTT - Installer Bootstrap
-# Downloads the Python installer package and runs `python3 -m installer install`
+# MeshCore to MQTT - Update Bootstrap
+# Downloads the Python installer package and runs `python3 -m installer update`
 # ============================================================================
 set -e
 
 REPO="${MCTOMQTT_REPO:-Cisien/meshcoretomqtt}"
 BRANCH="${MCTOMQTT_BRANCH:-main}"
 EXTRA_ARGS=()
+
+# Try to read repo/branch from existing config
+INSTALL_DIR="${MCTOMQTT_INSTALL_DIR:-/opt/mctomqtt}"
+CONFIG_DIR="${MCTOMQTT_CONFIG_DIR:-/etc/mctomqtt}"
+if [ -f "$CONFIG_DIR/config.d/00-user.toml" ]; then
+    _repo=$(python3 -c "
+import tomllib
+with open('$CONFIG_DIR/config.d/00-user.toml', 'rb') as f:
+    c = tomllib.load(f)
+print(c.get('update', {}).get('repo', ''))
+" 2>/dev/null || true)
+    _branch=$(python3 -c "
+import tomllib
+with open('$CONFIG_DIR/config.d/00-user.toml', 'rb') as f:
+    c = tomllib.load(f)
+print(c.get('update', {}).get('branch', ''))
+" 2>/dev/null || true)
+    [ -n "$_repo" ] && REPO="$_repo"
+    [ -n "$_branch" ] && BRANCH="$_branch"
+fi
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -56,8 +76,8 @@ else
     cp -r "$TMP_DIR/$REPO_NAME-$BRANCH_SANITIZED/installer" "$TMP_DIR/installer"
 fi
 
-# Run Python installer
+# Run Python updater
 export INSTALL_REPO="$REPO"
 export INSTALL_BRANCH="$BRANCH"
 cd "$TMP_DIR"
-python3 -m installer install "${EXTRA_ARGS[@]}"
+python3 -m installer update "${EXTRA_ARGS[@]}"

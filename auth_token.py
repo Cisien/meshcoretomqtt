@@ -3,18 +3,21 @@
 MeshCore Auth Token Generator
 Generates JWT-style authentication tokens for MQTT authentication
 """
+from __future__ import annotations
+
 import json
 import base64
 import hashlib
 import time
 import subprocess
 import sys
+from typing import Any
 
 def base64url_encode(data: bytes) -> str:
     """Base64url encode without padding"""
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
 
-def create_auth_token(public_key_hex: str, private_key_hex: str, expiry_seconds: int = 3600, **claims) -> str:
+def create_auth_token(public_key_hex: str, private_key_hex: str, expiry_seconds: int = 3600, **claims: Any) -> str:
     """
     Create a JWT-style auth token for MeshCore MQTT authentication
     
@@ -55,11 +58,11 @@ def create_auth_token(public_key_hex: str, private_key_hex: str, expiry_seconds:
     except subprocess.TimeoutExpired:
         raise Exception("Token generation timed out")
     except FileNotFoundError:
-        raise Exception("meshcore-decoder CLI not found. Please install: npm install -g @michaelhart/meshcore-decoder")
+        raise Exception("meshcore-decoder CLI not found. Install it with: npm install -g @michaelhart/meshcore-decoder")
     except Exception as e:
         raise Exception(f"Failed to generate auth token: {str(e)}")
 
-def verify_auth_token(token: str, expected_public_key_hex: str = None) -> dict:
+def verify_auth_token(token: str, expected_public_key_hex: str | None = None) -> dict[str, Any]:
     """
     Verify a JWT-style auth token and return the payload if valid.
     
@@ -112,7 +115,7 @@ def verify_auth_token(token: str, expected_public_key_hex: str = None) -> dict:
     except subprocess.TimeoutExpired:
         raise Exception("Token verification timed out")
     except FileNotFoundError:
-        raise Exception("meshcore-decoder CLI not found. Please install: npm install -g @michaelhart/meshcore-decoder")
+        raise Exception("meshcore-decoder CLI not found. Install it with: npm install -g @michaelhart/meshcore-decoder")
     except json.JSONDecodeError as e:
         raise Exception(f"Failed to parse verification output: {e}")
     except Exception as e:
@@ -121,7 +124,7 @@ def verify_auth_token(token: str, expected_public_key_hex: str = None) -> dict:
         raise Exception(f"Token verification error: {str(e)}")
 
 
-def decode_token_payload(token: str) -> dict:
+def decode_token_payload(token: str) -> dict[str, Any]:
     """
     Decode a JWT payload without verifying the signature.
     Useful for extracting claims before full verification.

@@ -6,14 +6,11 @@
     lib,
     ...
   }: let
-    # Mock package for testing
+    # Mock package for testing — just sleeps so systemd sees it as running
     mockMctomqtt = pkgs.writeShellApplication {
       name = "mctomqtt";
       text = ''
-        echo "Mock mctomqtt service - checking environment variables"
-        env | grep MCTOMQTT | sort
-        echo "Service would normally run here..."
-        # Simulate running service
+        echo "Mock mctomqtt service started with args: $*"
         while true; do sleep 10; done
       '';
     };
@@ -57,79 +54,109 @@
             serial-baud-rate = 9600;
             serial-timeout = 5;
             log-level = "DEBUG";
-            topic-status = "test/{IATA}/{PUBLIC_KEY}/status";
-            topic-packets = "test/{IATA}/{PUBLIC_KEY}/packets";
           };
         };
       };
 
       testScript = ''
+        import tomllib
+
         start_all()
 
         # Wait for the service to start
         machine.wait_for_unit("mctomqtt.service")
-
-        # Check that the service is running
         machine.succeed("systemctl is-active --quiet mctomqtt.service")
 
         # Verify the user and group were created
         machine.succeed("getent passwd mctomqtt")
         machine.succeed("getent group mctomqtt")
-
-        # Check that the user is in the dialout group
         machine.succeed("groups mctomqtt | grep -q dialout")
 
-        # Check the service's environment variables
-        with subtest("Check environment variables"):
-          # Basic configuration
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_IATA=TEST'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_SERIAL_PORTS=/dev/ttyS1'")
+        # Extract config file path from the systemd unit
+        unit_content = machine.succeed("systemctl cat mctomqtt.service")
+        config_path = None
+        for line in unit_content.splitlines():
+            if "--config" in line:
+                config_path = line.split("--config")[1].strip().split()[0].rstrip(";")
+                break
+        assert config_path is not None, "Could not find --config in ExecStart"
 
-          # Settings
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_SERIAL_BAUD_RATE=9600'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_SERIAL_TIMEOUT=5'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_LOG_LEVEL=DEBUG'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_TOPIC_STATUS=test/{IATA}/{PUBLIC_KEY}/status'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_TOPIC_PACKETS=test/{IATA}/{PUBLIC_KEY}/packets'")
+        # Read and parse the generated TOML config
+        config_toml = machine.succeed(f"cat {config_path}")
+        config = tomllib.loads(config_toml)
 
-          # Broker 1 configuration
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT1_ENABLED=true'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT1_SERVER=mqtt-eu-v1.letsmesh.net'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT1_PORT=443'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT1_TRANSPORT=websockets'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT1_USE_TLS=true'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT1_USE_AUTH_TOKEN=true'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT1_TOKEN_AUDIENCE=mqtt-eu-v1.letsmesh.net'")
+        with subtest("General section"):
+            assert config["general"]["iata"] == "TEST", f"iata: {config['general']['iata']}"
+            assert config["general"]["log_level"] == "DEBUG", f"log_level: {config['general']['log_level']}"
+            assert config["general"]["sync_time"] is True, f"sync_time: {config['general']['sync_time']}"
 
-          # Broker 2 configuration
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_ENABLED=true'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_SERVER=mqtt1.example.com'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_PORT=1883'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_TRANSPORT=tcp'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_USE_TLS=false'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_TLS_VERIFY=true'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_CLIENT_ID_PREFIX=test_'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_QOS=1'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_RETAIN=false'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_KEEPALIVE=30'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_USERNAME=user1'")
-          machine.succeed("systemctl show mctomqtt.service | grep -q 'MCTOMQTT_MQTT2_PASSWORD=pass1'")
+        with subtest("Serial section"):
+            assert "/dev/ttyS1" in config["serial"]["ports"], f"ports: {config['serial']['ports']}"
+            assert config["serial"]["baud_rate"] == 9600, f"baud_rate: {config['serial']['baud_rate']}"
+            assert config["serial"]["timeout"] == 5, f"timeout: {config['serial']['timeout']}"
 
-        # Check service dependencies
-        machine.succeed("systemctl show mctomqtt.service | grep 'After='    | grep -q 'dev-ttyS1.device'")
-        machine.succeed("systemctl show mctomqtt.service | grep 'Requires=' | grep -q 'dev-ttyS1.device'")
+        with subtest("Topics section (hardcoded defaults)"):
+            assert "meshcore/" in config["topics"]["status"]
+            assert "meshcore/" in config["topics"]["packets"]
+            assert "meshcore/" in config["topics"]["debug"]
+            assert "meshcore/" in config["topics"]["raw"]
 
-        # Check service runs as correct user
-        machine.succeed("systemctl show mctomqtt.service | grep -q 'User=mctomqtt'")
-        machine.succeed("systemctl show mctomqtt.service | grep -q 'Group=mctomqtt'")
+        with subtest("Remote serial section"):
+            assert config["remote_serial"]["enabled"] is False
+            assert config["remote_serial"]["allowed_companions"] == []
 
-        # Check service restart behavior
-        machine.succeed("systemctl show mctomqtt.service | grep -q 'Restart=on-failure'")
+        with subtest("Update section"):
+            assert config["update"]["repo"] == "Cisien/meshcoretomqtt"
+            assert config["update"]["branch"] == "main"
 
-        # Test that the service can be restarted
-        machine.succeed("systemctl restart mctomqtt.service")
-        machine.wait_for_unit("mctomqtt.service")
-        machine.succeed("systemctl is-active --quiet mctomqtt.service")
+        with subtest("Broker count — US disabled, EU + custom"):
+            brokers = config["broker"]
+            assert len(brokers) == 2, f"Expected 2 brokers, got {len(brokers)}"
+            names = [b["name"] for b in brokers]
+            assert "letsmesh-us" not in names, "US broker should be disabled"
+
+        with subtest("LetsMesh EU broker"):
+            eu = config["broker"][0]
+            assert eu["name"] == "letsmesh-eu"
+            assert eu["server"] == "mqtt-eu-v1.letsmesh.net"
+            assert eu["port"] == 443
+            assert eu["transport"] == "websockets"
+            assert eu["keepalive"] == 60
+            assert eu["qos"] == 0
+            assert eu["retain"] is True
+            assert eu["tls"]["enabled"] is True
+            assert eu["tls"]["verify"] is True
+            assert eu["auth"]["method"] == "token"
+            assert eu["auth"]["audience"] == "mqtt-eu-v1.letsmesh.net"
+
+        with subtest("Custom broker"):
+            custom = config["broker"][1]
+            assert custom["server"] == "mqtt1.example.com"
+            assert custom["port"] == 1883
+            assert custom["transport"] == "tcp"
+            assert custom["keepalive"] == 30
+            assert custom["qos"] == 1
+            assert custom["retain"] is False
+            assert custom["client_id_prefix"] == "test_"
+            assert custom["tls"]["enabled"] is False
+            assert custom["tls"]["verify"] is True
+            assert custom["auth"]["method"] == "password"
+            assert custom["auth"]["username"] == "user1"
+            assert custom["auth"]["password"] == "pass1"
+
+        with subtest("Service dependencies on serial device"):
+            machine.succeed("systemctl show mctomqtt.service | grep 'After='    | grep -q 'dev-ttyS1.device'")
+            machine.succeed("systemctl show mctomqtt.service | grep 'Requires=' | grep -q 'dev-ttyS1.device'")
+
+        with subtest("Service user and security"):
+            machine.succeed("systemctl show mctomqtt.service | grep -q 'User=mctomqtt'")
+            machine.succeed("systemctl show mctomqtt.service | grep -q 'Group=mctomqtt'")
+            machine.succeed("systemctl show mctomqtt.service | grep -q 'Restart=on-failure'")
+
+        with subtest("Service restart"):
+            machine.succeed("systemctl restart mctomqtt.service")
+            machine.wait_for_unit("mctomqtt.service")
+            machine.succeed("systemctl is-active --quiet mctomqtt.service")
 
         print("All tests passed!")
       '';

@@ -7,39 +7,59 @@
   }: let
     cfg = config.services.mctomqtt;
 
-    # Convert values to proper environment variable strings
-    toEnvValue = value:
-      if builtins.isBool value
-      then
-        if value
-        then "true"
-        else "false"
-      else if builtins.isList value
-      then lib.concatStringsSep "," value
-      else builtins.toString value;
+    tomlFormat = pkgs.formats.toml {};
 
-    # Convert Nix attribute set to environment variables
-    settingsToEnv = settings:
-      lib.mapAttrsToList (
-        name: value: "MCTOMQTT_${lib.toUpper (lib.replaceStrings ["-"] ["_"] name)}=${toEnvValue value}"
-      )
-      settings;
-
-    # Generate broker environment variables
-    brokersToEnv = brokers:
-      lib.flatten (lib.imap1 (
-          index: broker: let
-            prefix = "MCTOMQTT_MQTT${toString index}";
-          in
-            lib.mapAttrsToList (
-              name: value: "${prefix}_${lib.toUpper (lib.replaceStrings ["-"] ["_"] name)}=${toEnvValue value}"
-            )
-            broker
-        )
-        brokers);
+    # Map old flat broker attrs to the new nested TOML structure
+    mapBroker = name: broker: let
+      useTls = broker.use-tls or false;
+      tlsVerify = broker.tls-verify or true;
+      useAuthToken = broker.use-auth-token or false;
+      authMethod =
+        if useAuthToken
+        then "token"
+        else if (broker ? username)
+        then "password"
+        else "none";
+    in
+      {
+        name = name;
+        enabled = broker.enabled or true;
+        server = broker.server;
+        port = broker.port or 1883;
+        transport = broker.transport or "tcp";
+        keepalive = broker.keepalive or 60;
+        qos = broker.qos or 0;
+        retain = broker.retain or true;
+        tls = {
+          enabled = useTls;
+          verify = tlsVerify;
+        };
+        auth =
+          {
+            method = authMethod;
+          }
+          // lib.optionalAttrs (broker ? username) {
+            username = broker.username;
+          }
+          // lib.optionalAttrs (broker ? password) {
+            password = broker.password;
+          }
+          // lib.optionalAttrs (broker ? token-audience) {
+            audience = broker.token-audience;
+          }
+          // lib.optionalAttrs (broker ? owner) {
+            owner = broker.owner;
+          }
+          // lib.optionalAttrs (broker ? email) {
+            email = broker.email;
+          };
+      }
+      // lib.optionalAttrs (broker ? client-id-prefix) {
+        client_id_prefix = broker.client-id-prefix;
+      };
 
     # Default broker configurations
-    letsmeshUsConfig = {
+    letsmeshUsBroker = mapBroker "letsmesh-us" {
       enabled = true;
       server = "mqtt-us-v1.letsmesh.net";
       port = 443;
@@ -49,7 +69,7 @@
       token-audience = "mqtt-us-v1.letsmesh.net";
     };
 
-    letsmeshEuConfig = {
+    letsmeshEuBroker = mapBroker "letsmesh-eu" {
       enabled = true;
       server = "mqtt-eu-v1.letsmesh.net";
       port = 443;
@@ -61,9 +81,51 @@
 
     # Combine default brokers with user-defined brokers
     allBrokers =
-      lib.optional (cfg.defaults.letsmesh-us.enable) letsmeshUsConfig
-      ++ lib.optional (cfg.defaults.letsmesh-eu.enable) letsmeshEuConfig
-      ++ cfg.brokers;
+      lib.optional (cfg.defaults.letsmesh-us.enable) letsmeshUsBroker
+      ++ lib.optional (cfg.defaults.letsmesh-eu.enable) letsmeshEuBroker
+      ++ lib.imap1 (i: b: mapBroker (b.name or "broker-${toString i}") b) cfg.brokers;
+
+    # Extract known settings from cfg.settings
+    logLevel = cfg.settings.log-level or "INFO";
+    syncTime = cfg.settings.sync-time or true;
+    serialBaudRate = cfg.settings.serial-baud-rate or 115200;
+    serialTimeout = cfg.settings.serial-timeout or 2;
+
+    # Build the full TOML config structure
+    tomlConfig = {
+      general = {
+        iata = cfg.iata;
+        log_level = logLevel;
+        sync_time = syncTime;
+      };
+
+      serial = {
+        ports = cfg.serialPorts;
+        baud_rate = serialBaudRate;
+        timeout = serialTimeout;
+      };
+
+      topics = {
+        status = "meshcore/{IATA}/{PUBLIC_KEY}/status";
+        packets = "meshcore/{IATA}/{PUBLIC_KEY}/packets";
+        debug = "meshcore/{IATA}/{PUBLIC_KEY}/debug";
+        raw = "meshcore/{IATA}/{PUBLIC_KEY}/raw";
+      };
+
+      remote_serial = {
+        enabled = false;
+        allowed_companions = [];
+      };
+
+      update = {
+        repo = "Cisien/meshcoretomqtt";
+        branch = "main";
+      };
+
+      broker = allBrokers;
+    };
+
+    configFile = tomlFormat.generate "mctomqtt-config.toml" tomlConfig;
   in {
     options.services.mctomqtt = {
       enable = lib.mkEnableOption "MeshCore to MQTT bridge service";
@@ -95,6 +157,7 @@
         example = lib.literalExpression ''
           [
             {
+              name = "my-broker";
               enabled = true;
               server = "mqtt.example.com";
               port = 1883;
@@ -115,7 +178,7 @@
       settings = lib.mkOption {
         type = lib.types.attrsOf lib.types.anything;
         default = {};
-        description = "Additional settings converted to MCTOMQTT_* environment variables";
+        description = "Additional settings for the TOML configuration";
         example = lib.literalExpression ''
           {
             serial-baud-rate = 115200;
@@ -166,7 +229,7 @@
 
         serviceConfig = {
           Type = "simple";
-          ExecStart = "${cfg.package}/bin/mctomqtt";
+          ExecStart = "${cfg.package}/bin/mctomqtt --config ${configFile}";
           Restart = "on-failure";
 
           # Run as dedicated user
@@ -190,15 +253,6 @@
               "/var/log/mctomqtt"
             ]
             ++ cfg.serialPorts;
-
-          # Environment variables
-          Environment =
-            [
-              "MCTOMQTT_IATA=${cfg.iata}"
-              "MCTOMQTT_SERIAL_PORTS=${lib.concatStringsSep "," cfg.serialPorts}"
-            ]
-            ++ settingsToEnv cfg.settings
-            ++ brokersToEnv allBrokers;
         };
 
         # Ensure serial devices are available

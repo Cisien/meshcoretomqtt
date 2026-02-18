@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.meshcore.mctomqtt</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/mctomqtt/venv/bin/python3</string>
+        <string>/opt/mctomqtt/mctomqtt.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/opt/mctomqtt</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/mctomqtt/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>NVM_DIR</key>
+        <string>/opt/mctomqtt/.nvm</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/mctomqtt.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/mctomqtt-error.log</string>
+</dict>
+</plist>

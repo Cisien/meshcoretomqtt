@@ -1,0 +1,10 @@
+[project]
+name = "meshcoretomqtt"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
