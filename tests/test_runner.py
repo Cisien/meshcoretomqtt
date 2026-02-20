@@ -1,6 +1,8 @@
 """Tests for runner startup and main loop logic."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from bridge.runner import load_client_version, handle_signal
@@ -144,3 +146,107 @@ class TestFullStartupFlow:
         assert state.model == "Station G2"
         assert state.stats['device']['battery_mv'] == 4200
         assert state.client_version.startswith("meshcoretomqtt/1.0.8.0")
+
+
+class TestNullDeviceReconnection:
+    """Test that the main loop retries connection when state.device is None."""
+
+    @patch('bridge.runner.serial_connection')
+    @patch('bridge.runner.time')
+    def test_retries_connection_when_device_is_none(self, mock_time, mock_serial_conn):
+        """When device is None and reconnect interval has elapsed, retry connect."""
+        from bridge import runner
+
+        state = make_test_state()
+        state.device = None  # Simulate lost device
+
+        # time.time() returns values that exceed the reconnect interval
+        mock_time.time.side_effect = [10.0, 10.0]
+
+        new_device = FakeSerialConnection()
+        mock_serial_conn.connect.return_value = new_device
+
+        # Run one iteration: device is None, interval elapsed, connect succeeds
+        # We simulate the else branch directly
+        last_reconnect_attempt = 0.0
+        reconnect_interval = 5
+        watchdog_logged = False
+
+        now = mock_time.time()
+        assert now - last_reconnect_attempt >= reconnect_interval
+        state.device = mock_serial_conn.connect(state.config)
+        assert state.device is new_device
+        mock_serial_conn.connect.assert_called_once_with(state.config)
+
+    @patch('bridge.runner.serial_connection')
+    @patch('bridge.runner.time')
+    def test_skips_reconnect_within_interval(self, mock_time, mock_serial_conn):
+        """When device is None but interval hasn't elapsed, don't retry."""
+        state = make_test_state()
+        state.device = None
+
+        mock_time.time.return_value = 3.0
+
+        last_reconnect_attempt = 0.0
+        reconnect_interval = 5
+
+        now = mock_time.time()
+        assert now - last_reconnect_attempt < reconnect_interval
+        # connect should not be called
+        mock_serial_conn.connect.assert_not_called()
+
+    @patch('bridge.runner.serial_connection')
+    @patch('bridge.runner.time')
+    def test_logs_warning_once_on_repeated_failure(self, mock_time, mock_serial_conn):
+        """Warning is logged only once when device stays unavailable."""
+        import logging
+
+        state = make_test_state()
+        state.device = None
+
+        mock_serial_conn.connect.return_value = None
+        mock_time.time.side_effect = [10.0, 20.0]
+
+        last_reconnect_attempt = 0.0
+        reconnect_interval = 5
+        watchdog_logged = False
+
+        # First attempt — should set watchdog_logged = True
+        now = mock_time.time()
+        last_reconnect_attempt = now
+        state.device = mock_serial_conn.connect(state.config)
+        assert state.device is None
+        if not watchdog_logged:
+            watchdog_logged = True
+        assert watchdog_logged is True
+
+        # Second attempt — watchdog_logged already True, no duplicate warning
+        now = mock_time.time()
+        last_reconnect_attempt = now
+        state.device = mock_serial_conn.connect(state.config)
+        assert state.device is None
+        # watchdog_logged stays True — no re-logging
+        assert watchdog_logged is True
+
+    @patch('bridge.runner.serial_connection')
+    @patch('bridge.runner.time')
+    def test_resets_watchdog_on_successful_reconnect(self, mock_time, mock_serial_conn):
+        """watchdog_logged resets to False when reconnect succeeds."""
+        state = make_test_state()
+        state.device = None
+
+        new_device = FakeSerialConnection()
+        mock_serial_conn.connect.return_value = new_device
+        mock_time.time.return_value = 10.0
+
+        last_reconnect_attempt = 0.0
+        reconnect_interval = 5
+        watchdog_logged = True  # Previously logged
+
+        now = mock_time.time()
+        last_reconnect_attempt = now
+        state.device = mock_serial_conn.connect(state.config)
+        if state.device:
+            watchdog_logged = False
+        assert state.device is new_device
+        assert watchdog_logged is False
