@@ -172,6 +172,11 @@ def run(state: BridgeState) -> None:
     stats_thread.start()
     logger.debug("[STATS] Started statistics logging thread")
 
+    # Serial watchdog: force reconnect if no data received for this many seconds
+    serial_cfg = state.config.get('serial', {})
+    watchdog_timeout = serial_cfg.get('watchdog_timeout', 900)
+    watchdog_logged = False
+
     # Main event loop
     try:
         while True:
@@ -186,6 +191,25 @@ def run(state: BridgeState) -> None:
                     if line:
                         logger.debug(f"RX: {line}")
                         message_parser.parse_and_publish(state, line)
+                        watchdog_logged = False
+
+                    # Watchdog: detect silently dead serial connections
+                    elif state.device.seconds_since_activity() > watchdog_timeout:
+                        if not watchdog_logged:
+                            logger.warning(
+                                f"Serial watchdog: no data received for "
+                                f"{int(state.device.seconds_since_activity())}s "
+                                f"(threshold: {watchdog_timeout}s), forcing reconnect"
+                            )
+                        state.device.close()
+                        state.device = serial_connection.connect(state.config)
+                        if state.device:
+                            logger.info("Serial watchdog: reconnected successfully")
+                            watchdog_logged = False
+                        else:
+                            watchdog_logged = True
+                        sleep(0.5)
+
             except OSError:
                 logger.warning("Serial connection unavailable, trying to reconnect")
                 if state.device:

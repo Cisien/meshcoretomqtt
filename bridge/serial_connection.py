@@ -55,6 +55,11 @@ class SerialConnection(ABC):
         ...
 
     @abstractmethod
+    def seconds_since_activity(self) -> float:
+        """Seconds since data was last received from the device."""
+        ...
+
+    @abstractmethod
     def close(self) -> None: ...
 
     @property
@@ -68,6 +73,7 @@ class RealSerialConnection(SerialConnection):
     def __init__(self, port: serial.Serial) -> None:
         self._port = port
         self._lock = threading.Lock()
+        self._last_activity = time.time()
 
     def _send(self, cmd: str, delay: float = 0.5) -> str:
         """Send command and read response under lock."""
@@ -244,6 +250,9 @@ class RealSerialConnection(SerialConnection):
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.debug(f"Failed to parse stats-packets: {e}")
 
+        if stats:
+            self._last_activity = time.time()
+
         return stats
 
     def execute_command(self, command: str, timeout: float = 10.0) -> tuple[bool, str]:
@@ -306,8 +315,13 @@ class RealSerialConnection(SerialConnection):
         with self._lock:
             if self._port.in_waiting > 0:
                 line = self._port.readline().decode(errors='replace').strip()
-                return line if line else None
+                if line:
+                    self._last_activity = time.time()
+                    return line
         return None
+
+    def seconds_since_activity(self) -> float:
+        return time.time() - self._last_activity
 
     def close(self) -> None:
         try:

@@ -1,6 +1,7 @@
 """Tests for RealSerialConnection parsing logic with mock serial.Serial."""
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock, PropertyMock
 
 import serial
@@ -236,6 +237,60 @@ class TestReadLine:
         mock_port.readline.return_value = b"test line\n"
         conn = RealSerialConnection(mock_port)
         assert conn.read_line() == "test line"
+
+    def test_updates_last_activity_on_data(self):
+        mock_port = MagicMock(spec=serial.Serial)
+        mock_port.is_open = True
+        mock_port.in_waiting = 10
+        mock_port.readline.return_value = b"test line\n"
+        conn = RealSerialConnection(mock_port)
+        conn._last_activity = time.time() - 100
+        conn.read_line()
+        assert conn.seconds_since_activity() < 1
+
+    def test_does_not_update_activity_when_empty(self):
+        mock_port = MagicMock(spec=serial.Serial)
+        mock_port.is_open = True
+        mock_port.in_waiting = 0
+        conn = RealSerialConnection(mock_port)
+        conn._last_activity = time.time() - 100
+        conn.read_line()
+        assert conn.seconds_since_activity() >= 99
+
+
+# ------------------------------------------------------------------
+# seconds_since_activity (watchdog)
+# ------------------------------------------------------------------
+
+class TestSecondseSinceActivity:
+    def test_starts_at_zero(self):
+        conn, _ = _make_conn()
+        assert conn.seconds_since_activity() < 1
+
+    def test_increases_over_time(self):
+        conn, _ = _make_conn()
+        conn._last_activity = time.time() - 60
+        assert conn.seconds_since_activity() >= 59
+
+    def test_stats_update_resets_activity(self):
+        conn, mock_port = _make_conn([
+            b'stats-core\n  -> {"battery_mv":4200}\n> ',
+            b'stats-radio\n  -> Unknown command\n> ',
+            b'stats-packets\n  -> Unknown command\n> ',
+        ])
+        conn._last_activity = time.time() - 1000
+        conn.get_device_stats()
+        assert conn.seconds_since_activity() < 1
+
+    def test_empty_stats_do_not_reset_activity(self):
+        conn, mock_port = _make_conn([
+            b'',  # empty response
+            b'',
+            b'',
+        ])
+        conn._last_activity = time.time() - 1000
+        conn.get_device_stats()
+        assert conn.seconds_since_activity() >= 999
 
 
 # ------------------------------------------------------------------

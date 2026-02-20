@@ -6,7 +6,8 @@ import json
 import pytest
 
 from bridge.message_parser import RAW_PATTERN, PACKET_PATTERN, parse_and_publish
-from tests.fakes import FakeBrokerClient, make_test_state
+from bridge.mqtt_publish import publish_status
+from tests.fakes import FakeBrokerClient, make_test_state, make_config
 
 
 class TestRawPattern:
@@ -102,3 +103,64 @@ class TestParseAndPublish:
         assert msg['SNR'] == "-5"
         assert msg['RSSI'] == "-100"
         assert msg['score'] == "50"
+
+
+class TestIataInPublishedTopics:
+    """End-to-end: configured IATA must appear in every MQTT topic, never SEA."""
+
+    PUBKEY = "AA" * 32
+
+    def _make_state_with_iata(self, iata: str):
+        config = make_config()
+        config['general']['iata'] = iata
+        broker = FakeBrokerClient()
+        broker._connected = True
+        state = make_test_state(
+            config=config,
+            broker_clients=[{"client": broker, "broker_idx": 0, "connected": True}],
+            repeater_name="ParisNode",
+            repeater_pub_key=self.PUBKEY,
+        )
+        return state, broker
+
+    def test_packet_topic_uses_configured_iata(self):
+        state, broker = self._make_state_with_iata("CDG")
+        line = "12:34:56 - 1/15/2025 U: RX, len=64 (type=1, route=D, payload_len=48) SNR=10 RSSI=-80 score=100 hash=ABCD1234"
+        parse_and_publish(state, line)
+        assert len(broker.published) == 1
+        topic = broker.published[0][0]
+        assert f"meshcore/CDG/{self.PUBKEY}/packets" == topic
+        assert "/SEA/" not in topic
+
+    def test_status_topic_uses_configured_iata(self):
+        state, broker = self._make_state_with_iata("CDG")
+        publish_status(state, "online")
+        assert len(broker.published) == 1
+        topic = broker.published[0][0]
+        assert f"meshcore/CDG/{self.PUBKEY}/status" == topic
+        assert "/SEA/" not in topic
+
+    def test_debug_topic_uses_configured_iata(self):
+        state, broker = self._make_state_with_iata("CDG")
+        state.debug = True
+        line = "DEBUG test message"
+        parse_and_publish(state, line)
+        assert len(broker.published) == 1
+        topic = broker.published[0][0]
+        assert f"meshcore/CDG/{self.PUBKEY}/debug" == topic
+        assert "/SEA/" not in topic
+
+    def test_iata_not_hardcoded_to_sea(self):
+        """Two different IATAs must produce different topics."""
+        state_cdg, broker_cdg = self._make_state_with_iata("CDG")
+        state_nrt, broker_nrt = self._make_state_with_iata("NRT")
+        line = "12:34:56 - 1/15/2025 U: RX, len=64 (type=1, route=D, payload_len=48) SNR=10 RSSI=-80 score=100 hash=ABCD1234"
+
+        parse_and_publish(state_cdg, line)
+        parse_and_publish(state_nrt, line)
+
+        topic_cdg = broker_cdg.published[0][0]
+        topic_nrt = broker_nrt.published[0][0]
+        assert "/CDG/" in topic_cdg
+        assert "/NRT/" in topic_nrt
+        assert topic_cdg != topic_nrt
