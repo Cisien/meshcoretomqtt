@@ -176,6 +176,8 @@ def run(state: BridgeState) -> None:
     serial_cfg = state.config.get('serial', {})
     watchdog_timeout = serial_cfg.get('watchdog_timeout', 900)
     watchdog_logged = False
+    last_reconnect_attempt = 0.0
+    reconnect_interval = 5  # seconds between retry attempts
 
     # Main event loop
     try:
@@ -209,6 +211,19 @@ def run(state: BridgeState) -> None:
                         else:
                             watchdog_logged = True
                         sleep(0.5)
+                else:
+                    # Device is None — periodically retry connection
+                    now = time.time()
+                    if now - last_reconnect_attempt >= reconnect_interval:
+                        last_reconnect_attempt = now
+                        state.device = serial_connection.connect(state.config)
+                        if state.device:
+                            logger.info("Serial reconnected successfully")
+                            watchdog_logged = False
+                        else:
+                            if not watchdog_logged:
+                                logger.warning("Serial device unavailable, retrying every %ds", reconnect_interval)
+                                watchdog_logged = True
 
             except OSError:
                 logger.warning("Serial connection unavailable, trying to reconnect")
