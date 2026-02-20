@@ -33,6 +33,9 @@ baud_rate = 115200
 # Serial read timeout in seconds
 timeout = 2
 
+# Watchdog: seconds with no data before forcing serial reconnect (0 to disable)
+watchdog_timeout = 900
+
 [topics]
 # Topic templates - supported variables: {IATA}, {PUBLIC_KEY}
 status = "meshcore/{IATA}/{PUBLIC_KEY}/status"

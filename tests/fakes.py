@@ -40,6 +40,7 @@ class FakeSerialConnection(SerialConnection):
         self._closed = False
         self.time_set = False
         self.commands_executed: list[str] = []
+        self._last_activity = time.time()
 
     def set_time(self) -> None:
         self.time_set = True
@@ -73,8 +74,12 @@ class FakeSerialConnection(SerialConnection):
 
     def read_line(self) -> str | None:
         if self._lines:
+            self._last_activity = time.time()
             return self._lines.pop(0)
         return None
+
+    def seconds_since_activity(self) -> float:
+        return time.time() - self._last_activity
 
     def close(self) -> None:
         self._closed = True
