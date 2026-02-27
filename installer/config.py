@@ -607,10 +607,14 @@ def configure_mqtt_brokers(ctx: InstallerContext) -> None:
         else:
             print_warning(f"No MQTT brokers configured - you'll need to edit {user_toml} manually")
 
-    # Fix ownership after writing config
+    # Fix ownership after writing config (group may not exist yet during
+    # first install — set_permissions will fix it after user creation)
     if platform.system() != "Darwin" and ctx.svc_user:
         import shutil as _shutil
-        _shutil.chown(user_toml, "root", ctx.svc_user)
+        try:
+            _shutil.chown(user_toml, "root", ctx.svc_user)
+        except LookupError:
+            pass
         os.chmod(user_toml, 0o644)
 
 
