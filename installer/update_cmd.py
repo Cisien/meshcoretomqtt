@@ -16,8 +16,10 @@ from .config import configure_mqtt_brokers, update_owner_info
 from .system import (
     LOCAL_IMAGE,
     check_service_health,
+    create_system_user,
     create_version_info,
     create_venv,
+    detect_service_user,
     detect_system_type,
     docker_cmd,
     download_repo_archive,
@@ -199,6 +201,8 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     # Permissions and version info
     # ---------------------------------------------------------------------------
     if platform.system() != "Darwin" and ctx.svc_user:
+        ctx.svc_user = detect_service_user(ctx)
+        create_system_user(ctx.svc_user, ctx.install_dir)
         set_permissions(ctx.install_dir, ctx.config_dir, ctx.svc_user)
 
     create_version_info(ctx)

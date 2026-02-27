@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import pwd
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -138,15 +139,19 @@ def download_repo_archive(repo: str, branch: str, dest_dir: str) -> str:
 # Service user management
 # ---------------------------------------------------------------------------
 
-def prompt_service_user(ctx: InstallerContext) -> str:
-    """Prompt for the service account username and return it.
+def detect_service_user(ctx: InstallerContext) -> str:
+    """Detect the service user for an existing installation.
 
-    Only reads the existing systemd unit's User= if a 1.1+ version_info
-    file exists (meaning the user chose that account in a previous 1.1+
-    install). Pre-1.1 installs ran as the user's own account, so we
-    always default to 'mctomqtt' for those.
+    For 1.1+ installs, reads the User= from the existing systemd unit
+    (the user chose that account in a previous 1.1+ install).
+    Also checks /etc/passwd for a user whose home directory matches the
+    install directory (how create_system_user sets up accounts).
+    For pre-1.1 installs, returns the default ('mctomqtt') since those
+    ran as the user's own account and should be migrated.
     """
     default = ctx.svc_user  # "mctomqtt"
+    unit_user: str | None = None
+    passwd_user: str | None = None
 
     # Only inherit from existing unit if this is a 1.1+ install
     version_info_path = Path(ctx.install_dir) / ".version_info"
@@ -159,10 +164,49 @@ def prompt_service_user(ctx: InstallerContext) -> str:
                 if unit_path.exists():
                     for line in unit_path.read_text().splitlines():
                         if line.startswith("User="):
-                            default = line.split("=", 1)[1].strip()
+                            unit_user = line.split("=", 1)[1].strip()
                             break
         except (json.JSONDecodeError, ValueError, OSError):
-            pass  # Corrupted or unreadable — stick with default
+            pass  # Corrupted or unreadable — skip
+
+    # Check /etc/passwd for a user whose home dir matches the install dir
+    try:
+        for entry in pwd.getpwall():
+            if entry.pw_dir == ctx.install_dir:
+                passwd_user = entry.pw_name
+                break
+    except (KeyError, OSError):
+        pass
+
+    # Resolve: prefer unit_user, fall back to passwd_user, then default
+    if unit_user and passwd_user and unit_user != passwd_user:
+        if ctx.update_mode:
+            print_warning(
+                f"Systemd unit user '{unit_user}' differs from "
+                f"passwd user '{passwd_user}' — using '{passwd_user}'"
+            )
+            return passwd_user
+        choice = prompt_input(
+            f"Systemd unit user is '{unit_user}' but passwd user "
+            f"is '{passwd_user}'. Which should be used?",
+            passwd_user,
+        )
+        return choice
+
+    if unit_user:
+        return unit_user
+    if passwd_user:
+        return passwd_user
+    return default
+
+
+def prompt_service_user(ctx: InstallerContext) -> str:
+    """Prompt for the service account username and return it.
+
+    Uses detect_service_user() to determine the default, then prompts
+    the user to confirm or change it.
+    """
+    default = detect_service_user(ctx)
 
     username = prompt_input("Service account username", default)
     # Sanitize: lowercase, strip spaces
