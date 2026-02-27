@@ -23,8 +23,14 @@ for arg in "${EXTRA_ARGS[@]}"; do
     [ "$arg" = "--help" ] || [ "$arg" = "-h" ] && _needs_root=false
 done
 if [ "$_needs_root" = true ] && [ "$(id -u)" -ne 0 ]; then
-    echo "This installer requires root privileges. Re-running with sudo..."
-    exec sudo bash "$0" "$@"
+    if [ -f "$0" ]; then
+        echo "This installer requires root privileges. Re-running with sudo..."
+        exec sudo bash "$0" "$@"
+    else
+        echo "Error: This installer requires root privileges."
+        echo "Please re-run with: curl -fsSL <url> | sudo bash"
+        exit 1
+    fi
 fi
 
 # Check Python 3.11+
