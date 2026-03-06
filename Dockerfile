@@ -43,5 +43,9 @@ COPY ./bridge/ /opt/mctomqtt/bridge/
 #   -v /path/to/config.toml:/etc/mctomqtt/config.toml
 # Or mount a drop-in override:
 #   -v /path/to/00-user.toml:/etc/mctomqtt/config.d/00-user.toml
+
+RUN adduser -D mctomqtt
+RUN addgroup mctomqtt dialout
+
 USER mctomqtt
 CMD ["python3", "/opt/mctomqtt/mctomqtt.py"]
