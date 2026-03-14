@@ -47,7 +47,11 @@ class BLESerialConnection(SerialConnection):
 
     def _run_ble_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._ble_loop())
+        self._ble_task = self._loop.create_task(self._ble_loop())
+        try:
+            self._loop.run_until_complete(self._ble_task)
+        except asyncio.CancelledError:
+            pass
 
     async def _scan_for_device(self) -> str | None:
         from bleak import BleakScanner  # type: ignore[import]
@@ -125,8 +129,8 @@ class BLESerialConnection(SerialConnection):
     def close(self) -> None:
         self._should_stop = True
         self._ble_connected = False
-        if not self._loop.is_closed():
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        if not self._loop.is_closed() and hasattr(self, '_ble_task'):
+            self._loop.call_soon_threadsafe(self._ble_task.cancel)
         self._thread.join(timeout=5)
 
     @property
