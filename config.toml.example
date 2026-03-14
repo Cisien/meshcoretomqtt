@@ -36,6 +36,40 @@ timeout = 2
 # Watchdog: seconds with no data before forcing serial reconnect (0 to disable)
 watchdog_timeout = 900
 
+[ble]
+# Receive MeshCore packet logs wirelessly via Bluetooth Low Energy (Nordic UART Service).
+# Requires the 'bleak' Python package: pip install bleak
+#
+# When enabled, BLE replaces the serial connection as the log source.
+# Because the BLE log stream is one-way (device → host), bidirectional serial
+# commands (get name, set time, etc.) are not available — provide device_name,
+# public_key, and radio_info here instead.
+#
+# The MeshCore firmware must be built with MESH_PACKET_LOGGING=1 and
+# BLE_PACKET_LOGGING=1 (ESP32 or nRF52 only).
+enabled = false
+
+# BLE device address to connect to.
+# Use "scan" to auto-discover by scanning for the Nordic UART Service UUID.
+# On Linux/Windows this is a MAC address (e.g. "AA:BB:CC:DD:EE:FF").
+# On macOS this is a CoreBluetooth UUID (e.g. "12345678-ABCD-...").
+address = "scan"
+
+# When address = "scan": filter by advertised device name (recommended).
+# Leave empty to connect to the first NUS device found.
+scan_name = ""
+
+# Seconds to spend scanning before giving up.
+scan_timeout = 10
+
+# Device identity — required when BLE is enabled (cannot be queried over BLE).
+# device_name: shown as the repeater name in MQTT and logs.
+device_name = ""
+# public_key: 64 hex chars, used for MQTT topic routing.
+public_key = ""
+# radio_info: free-form string describing the radio config (e.g. "SF9 BW125").
+radio_info = ""
+
 [topics]
 # Topic templates - supported variables: {IATA}, {PUBLIC_KEY}
 status = "meshcore/{IATA}/{PUBLIC_KEY}/status"

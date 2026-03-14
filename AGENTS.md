@@ -16,6 +16,8 @@ python3 mctomqtt.py --config config.toml.example --debug    # enables DEBUG-leve
 
 **Python dependencies:** `pyserial`, `paho-mqtt` (install via pip or venv). Requires Python 3.11+ for `tomllib` stdlib.
 
+**Optional BLE dependency:** `bleak>=0.20` — required only when `[ble] enabled = true` in config. Install with `pip install bleak` or `pip install meshcoretomqtt[ble]`.
+
 **Optional dependency:** `meshcore-decoder` (Node.js CLI, `npm install -g @michaelhart/meshcore-decoder`) — required for JWT auth token generation/verification.
 
 **Docker:**
@@ -37,7 +39,8 @@ The runtime codebase is a `bridge/` Python package with a thin entry point (proj
 - **`mctomqtt.py`** — Thin entry point (~45 lines). Keeps `__version__`, argparse, logging setup. Creates `MeshCoreBridge(config, debug, version)` and calls `bridge.run()`.
 
 - **`bridge/`** — Python package containing all application logic, split into focused modules:
-  - **`serial_connection.py`** — `SerialConnection` ABC + `RealSerialConnection` (device I/O with internal locking) + `connect()` factory
+  - **`serial_connection.py`** — `SerialConnection` ABC + `RealSerialConnection` (device I/O with internal locking) + `connect()` factory (returns `BLESerialConnection` if `[ble] enabled = true`)
+  - **`ble_connection.py`** — `BLESerialConnection` (receives log lines via BLE Nordic UART Service using `bleak`; device identity values come from config)
   - **`auth_provider.py`** — `AuthProvider` ABC + `MeshCoreAuthProvider` (wraps `auth_token.py`)
   - **`broker_client.py`** — `BrokerClient` ABC + `PahoBrokerClient` (wraps paho-mqtt)
   - **`state.py`** — `BridgeState` shared mutable state container (all ~30 instance variables)
@@ -56,7 +59,7 @@ The runtime codebase is a `bridge/` Python package with a thin entry point (proj
 
 ### Testability
 
-Three ABC boundaries (`SerialConnection`, `AuthProvider`, `BrokerClient`) allow full control over external dependencies in tests. Fakes are in `tests/fakes.py`:
+Three ABC boundaries (`SerialConnection`, `AuthProvider`, `BrokerClient`) allow full control over external dependencies in tests. `BLESerialConnection` is tested via `__new__` construction (bypassing the BLE background thread) to exercise line-buffering and config-reading logic without hardware. Fakes are in `tests/fakes.py`:
 - `FakeSerialConnection` — returns canned device values
 - `FakeAuthProvider` — returns deterministic tokens, configurable verify/reject
 - `FakeBrokerClient` — records published messages for assertion

@@ -4,6 +4,7 @@ requires-python = ">=3.11"
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
+ble = ["bleak>=0.20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
