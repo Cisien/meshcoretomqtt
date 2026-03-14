@@ -1,6 +1,11 @@
 [project]
+version = "0.0.1"
 name = "meshcoretomqtt"
 requires-python = ">=3.11"
+dependencies = [
+    "paho-mqtt>=2.1.0",
+    "pyserial>=3.5",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
