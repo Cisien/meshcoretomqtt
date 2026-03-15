@@ -121,8 +121,16 @@ class TestDeviceInfo:
         conn = _make_conn()
         assert conn.get_radio_info() is None
 
-    def test_get_privkey_always_none(self):
-        conn = _make_conn({'private_key': 'should_be_ignored'})
+    def test_get_privkey_returns_config_value(self):
+        conn = _make_conn({'private_key': 'aabbcc'})
+        assert conn.get_privkey() == 'AABBCC'
+
+    def test_get_privkey_empty_returns_none(self):
+        conn = _make_conn({'private_key': ''})
+        assert conn.get_privkey() is None
+
+    def test_get_privkey_missing_returns_none(self):
+        conn = _make_conn()
         assert conn.get_privkey() is None
 
     def test_get_firmware_version_always_none(self):

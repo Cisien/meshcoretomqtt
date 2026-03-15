@@ -236,12 +236,8 @@ def create_auth_token(public_key_hex: str, private_key_hex: str,
     Create a JWT-style auth token signed with the device's Ed25519 private key.
 
     Uses a pure-Python Ed25519 implementation (no external dependencies).
-    Falls back to the meshcore-decoder CLI on unexpected errors.
     """
-    try:
-        return _create_auth_token_python(public_key_hex, private_key_hex, expiry_seconds, **claims)
-    except Exception:
-        return _create_auth_token_cli(public_key_hex, private_key_hex, expiry_seconds, **claims)
+    return _create_auth_token_python(public_key_hex, private_key_hex, expiry_seconds, **claims)
 
 
 def verify_auth_token(token: str, expected_public_key_hex: str | None = None) -> dict[str, Any]:
