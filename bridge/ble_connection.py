@@ -152,7 +152,8 @@ class BLESerialConnection(SerialConnection):
         return key.upper() if key else None
 
     def get_privkey(self) -> str | None:
-        return None  # Not available over BLE
+        key: str = self._config.get('ble', {}).get('private_key', '')
+        return key.upper() if key else None
 
     def get_radio_info(self) -> str | None:
         return self._config.get('ble', {}).get('radio_info') or None
