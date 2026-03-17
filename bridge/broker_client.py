@@ -80,12 +80,20 @@ class PahoBrokerClient(BrokerClient):
         if on_message:
             self._client.on_message = on_message
 
+        def _on_log(client, userdata, level, buf):
+            logger.debug(f"[paho] {buf}")
+        self._client.on_log = _on_log
+
         if tls_enabled:
-            if tls_verify:
-                self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-                self._client.tls_insecure_set(False)
-            else:
-                self._client.tls_set(cert_reqs=ssl.CERT_NONE)
+            ctx = ssl.create_default_context()
+            if not tls_verify:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            if transport == "websockets":
+                # WebSocket upgrade requires HTTP/1.1; prevent TLS from negotiating HTTP/2
+                ctx.set_alpn_protocols(["http/1.1"])
+            self._client.tls_set_context(ctx)
+            if not tls_verify:
                 self._client.tls_insecure_set(True)
 
         if transport == "websockets":

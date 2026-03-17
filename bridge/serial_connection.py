@@ -337,8 +337,26 @@ class RealSerialConnection(SerialConnection):
         return getattr(self._port, 'is_open', False)
 
 
-def connect(config: dict[str, Any]) -> RealSerialConnection | None:
-    """Try configured serial ports and return the first successful connection."""
+def connect(config: dict[str, Any]) -> SerialConnection | None:
+    """Return a connection to the MeshCore device.
+
+    If ``[ble]`` is enabled in config, returns a ``BLESerialConnection``
+    (requires the ``bleak`` package).  Otherwise tries each configured serial
+    port in order and returns the first that opens successfully.
+    """
+    ble_cfg = config.get('ble', {})
+    if ble_cfg.get('enabled', False):
+        try:
+            from .ble_connection import BLESerialConnection
+        except ImportError:
+            logger.error(
+                "BLE mode is enabled but 'bleak' is not installed. "
+                "Run: pip install bleak"
+            )
+            return None
+        logger.info("BLE mode: connecting via Nordic UART Service")
+        return BLESerialConnection(config)
+
     serial_cfg = config.get('serial', {})
     ports = serial_cfg.get('ports', ['/dev/ttyACM0'])
     baud_rate = serial_cfg.get('baud_rate', 115200)
