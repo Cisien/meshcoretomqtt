@@ -9,9 +9,13 @@ you can easily troubleshoot packets through the mesh. You will need to build a
 custom image with packet logging and/or debug for your repeater to view the
 data.
 
+The parser supports the current MeshCore packet log variants from `main`,
+including repeater packet logs without `hash=` and dispatcher/serial logs that
+include `time=` and `hash=`.
+
 One way of tracking a message through the mesh is filtering the MQTT data on the
-hash field as each message has a unique hash. You can see which repeaters the
-message hits!
+`hash` field when the source log format includes it. Dispatcher/serial packet
+logs include `hash=...`, while current repeater packet logs may not.
 
 ## Quick Install
 
@@ -516,4 +520,3 @@ Direct packet...
 Topic: meshcore/SEA/A1B2.../packets QoS: 0
 {"origin": "ag loft rpt", "origin_id": "A1B2...", "timestamp": "2025-03-15T23:09:00.710459", "type": "PACKET", "direction": "rx", "time": "23:08:59", "date": "15/3/2025", "len": "22", "packet_type": "2", "route": "D", "payload_len": "20", "raw": "0A1B2C...", "SNR": "5", "RSSI": "-93", "score": "1000", "hash": "890BFA3069FD1250", "path": "C2 -> E2"}
 ```
-
