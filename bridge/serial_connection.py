@@ -70,22 +70,23 @@ class SerialConnection(ABC):
 class RealSerialConnection(SerialConnection):
     """Concrete implementation wrapping serial.Serial with internal locking."""
 
-    def __init__(self, port: serial.Serial) -> None:
+    def __init__(self, port: serial.Serial, cmd_delay: float = 0.5) -> None:
         self._port = port
         self._lock = threading.Lock()
         self._last_activity = time.time()
+        self._cmd_delay = cmd_delay
 
-    def _send(self, cmd: str, delay: float = 0.5) -> str:
+    def _send(self, cmd: str) -> str:
         """Send command and read response under lock."""
         with self._lock:
             return self._send_unlocked(cmd, delay)
 
-    def _send_unlocked(self, cmd: str, delay: float = 0.5) -> str:
+    def _send_unlocked(self, cmd: str) -> str:
         """Send command and read response (caller must hold lock)."""
         self._port.reset_input_buffer()
         self._port.reset_output_buffer()
         self._port.write(cmd.encode())
-        sleep(delay)
+        sleep(self._cmd_delay)
         return self._port.read_all().decode(errors='replace')
 
     def set_time(self) -> None:
@@ -343,6 +344,7 @@ def connect(config: dict[str, Any]) -> RealSerialConnection | None:
     ports = serial_cfg.get('ports', ['/dev/ttyACM0'])
     baud_rate = serial_cfg.get('baud_rate', 115200)
     timeout = serial_cfg.get('timeout', 2)
+    cmd_delay = serial_cfg.get('cmd_delay', 0.5)
 
     for port in ports:
         try:
@@ -359,7 +361,7 @@ def connect(config: dict[str, Any]) -> RealSerialConnection | None:
             ser.reset_input_buffer()
             ser.reset_output_buffer()
             logger.info(f"Connected to {port}")
-            return RealSerialConnection(ser)
+            return RealSerialConnection(port=ser, cmd_delay=cmd_delay)
         except (serial.SerialException, OSError) as e:
             logger.warning(f"Failed to connect to {port}: {str(e)}")
             continue
