@@ -110,6 +110,8 @@ audience = "mqtt-us-v1.letsmesh.net"
 owner = ""
 # email: your LetsMesh.net account email address
 email = ""
+# Timeout (in seconds) for generating the auth token
+auth_timeout = 10
 
 # --- LetsMesh EU broker with auth token ---
 [[broker]]
