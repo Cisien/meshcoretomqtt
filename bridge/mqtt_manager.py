@@ -314,6 +314,7 @@ class MqttManager:
                 use_tls = tls_cfg.get('enabled', False)
                 tls_verify = tls_cfg.get('verify', True)
                 secure_connection = use_tls and tls_verify
+                auth_timeout = auth.get('auth_timeout', 10)
 
                 owner = auth.get('owner', '')
                 email = auth.get('email', '')
@@ -333,7 +334,7 @@ class MqttManager:
 
                 claims['client'] = state.client_version
 
-                password = state.auth.create_token(state.repeater_pub_key, state.repeater_priv_key, expiry_seconds=state.token_ttl, **claims)
+                password = state.auth.create_token(state.repeater_pub_key, state.repeater_priv_key, expiry_seconds=state.token_ttl, auth_timeout=auth_timeout, **claims)
                 state.token_cache[broker_idx] = (password, current_time)
                 logger.debug(f"[{broker.get('name', broker_idx)}] Generated fresh auth token (1h expiry)")
                 return username, password

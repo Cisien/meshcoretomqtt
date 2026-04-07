@@ -12,7 +12,8 @@ class AuthProvider(ABC):
 
     @abstractmethod
     def create_token(self, public_key_hex: str, private_key_hex: str,
-                     expiry_seconds: int = 3600, **claims: Any) -> str: ...
+                     expiry_seconds: int = 3600, auth_timeout: int = 10,
+                     **claims: Any) -> str: ...
 
     @abstractmethod
     def verify_token(self, token: str, expected_public_key_hex: str | None = None) -> dict[str, Any]: ...
@@ -25,9 +26,11 @@ class MeshCoreAuthProvider(AuthProvider):
     """Concrete auth provider delegating to meshcore-decoder CLI via auth_token.py."""
 
     def create_token(self, public_key_hex: str, private_key_hex: str,
-                     expiry_seconds: int = 3600, **claims: Any) -> str:
+                     expiry_seconds: int = 3600, auth_timeout: int = 10,
+                     **claims: Any) -> str:
         return create_auth_token(public_key_hex, private_key_hex,
-                                 expiry_seconds=expiry_seconds, **claims)
+                                 expiry_seconds=expiry_seconds,
+                                 auth_timeout=auth_timeout, **claims)
 
     def verify_token(self, token: str, expected_public_key_hex: str | None = None) -> dict[str, Any]:
         return verify_auth_token(token, expected_public_key_hex)

@@ -17,44 +17,44 @@ def base64url_encode(data: bytes) -> str:
     """Base64url encode without padding"""
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
 
-def create_auth_token(public_key_hex: str, private_key_hex: str, expiry_seconds: int = 3600, **claims: Any) -> str:
+def create_auth_token(public_key_hex: str, private_key_hex: str, expiry_seconds: int = 3600, auth_timeout: int = 10, **claims: Any) -> str:
     """
     Create a JWT-style auth token for MeshCore MQTT authentication
-    
+
     Uses the meshcore-decoder CLI tool.
-    
+
     Args:
         public_key_hex: 32-byte public key in hex format
         private_key_hex: 64-byte private key in hex format (MeshCore format)
         expiry_seconds: Token expiry time in seconds (default 24 hours)
         **claims: Additional JWT claims (e.g., audience="mqtt.example.com", sub="device-123")
-    
+
     Returns:
         JWT-style token string
     """
     try:
         cmd = ['meshcore-decoder', 'auth-token', public_key_hex, private_key_hex, '-e', str(expiry_seconds)]
-        
+
         if claims:
             claims_json = json.dumps(claims)
             cmd.extend(['-c', claims_json])
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=15
+            timeout=auth_timeout
         )
-        
+
         if result.returncode != 0:
             raise Exception(f"meshcore-decoder error: {result.stderr}")
-        
+
         token = result.stdout.strip()
         if not token or token.count('.') != 2:
             raise Exception(f"Invalid token format: {token}")
-        
+
         return token
-        
+
     except subprocess.TimeoutExpired:
         raise Exception("Token generation timed out")
     except FileNotFoundError:
@@ -65,53 +65,53 @@ def create_auth_token(public_key_hex: str, private_key_hex: str, expiry_seconds:
 def verify_auth_token(token: str, expected_public_key_hex: str | None = None) -> dict[str, Any]:
     """
     Verify a JWT-style auth token and return the payload if valid.
-    
+
     Uses the meshcore-decoder CLI tool for signature verification.
-    
+
     Args:
         token: JWT-style token string (header.payload.signature)
         expected_public_key_hex: Optional - verify the token was signed by this public key
-    
+
     Returns:
         Decoded payload dict if valid
-        
+
     Raises:
         Exception if token is invalid, expired, or signature verification fails
     """
     try:
         cmd = ['meshcore-decoder', 'verify-token', token, '--json']
-        
+
         if expected_public_key_hex:
             cmd.extend(['-p', expected_public_key_hex])
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=10
         )
-        
+
         if result.returncode != 0:
             error_msg = result.stderr.strip() if result.stderr else "Verification failed"
             raise Exception(f"Token verification failed: {error_msg}")
-        
+
         # The CLI outputs JSON with {valid: true/false, payload: {...}, ...} when --json is used
         output_json = result.stdout.strip()
         if not output_json:
             raise Exception("Empty output from verification")
-        
+
         output = json.loads(output_json)
-        
+
         if not output.get('valid', False):
             error = output.get('error', 'Unknown verification error')
             raise Exception(f"Token verification failed: {error}")
-        
+
         # Check if token is expired (CLI includes this info)
         if output.get('expired', False):
             raise Exception("Token has expired")
-        
+
         return output.get('payload', {})
-        
+
     except subprocess.TimeoutExpired:
         raise Exception("Token verification timed out")
     except FileNotFoundError:
@@ -128,13 +128,13 @@ def decode_token_payload(token: str) -> dict[str, Any]:
     """
     Decode a JWT payload without verifying the signature.
     Useful for extracting claims before full verification.
-    
+
     Args:
         token: JWT-style token string (header.payload.signature)
-    
+
     Returns:
         Decoded payload dict
-        
+
     Raises:
         Exception if token format is invalid
     """
@@ -142,17 +142,17 @@ def decode_token_payload(token: str) -> dict[str, Any]:
         parts = token.split('.')
         if len(parts) != 3:
             raise Exception(f"Invalid token format: expected 3 parts, got {len(parts)}")
-        
+
         # Decode the payload (second part)
         payload_b64 = parts[1]
         # Add padding if needed
         padding = 4 - len(payload_b64) % 4
         if padding != 4:
             payload_b64 += '=' * padding
-        
+
         payload_bytes = base64.urlsafe_b64decode(payload_b64)
         return json.loads(payload_bytes.decode('utf-8'))
-        
+
     except json.JSONDecodeError as e:
         raise Exception(f"Failed to decode token payload: {e}")
     except Exception as e:
@@ -181,10 +181,10 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python auth_token.py <public_key_hex> <private_key_hex_or_file>")
         sys.exit(1)
-    
+
     public_key = sys.argv[1]
     private_key_input = sys.argv[2]
-    
+
     if len(private_key_input) < 128:
         try:
             private_key = read_private_key_file(private_key_input)
@@ -194,7 +194,7 @@ if __name__ == "__main__":
             sys.exit(1)
     else:
         private_key = private_key_input
-    
+
     try:
         token = create_auth_token(public_key, private_key)
         print(f"Generated token: {token}")
