@@ -296,6 +296,11 @@ method = "token"
 audience = "mqtt-us-v1.letsmesh.net"
 ```
 
+**Note:** For older Raspberry Pi devices or devices under heavy loads,
+the token generation timeout is too short (default 10 seconds). The parameter
+`auth_timeout` can be added to the `broker.auth` section to increase this
+value to accommodate these devices.
+
 The script will:
 
 - Read the private key from the connected MeshCore device via serial
@@ -475,7 +480,7 @@ The uninstaller will:
 ## Privacy
 
 This tool collects and forwards all packets transmitted over the MeshCore
-network. Privacy on MeshCore is provided by protecting secret channel 
+network. Privacy on MeshCore is provided by protecting secret channel
 keys. All packets will be forwarded as raw data without additional processing
 or decryption. The primary use of this script is to send data to LetsMesh.net.
 Learn at https://letsmesh.net/
