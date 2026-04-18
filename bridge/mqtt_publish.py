@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def safe_publish(
     state: BridgeState,
-    topic: str,
+    topic_type: str,
     payload: str,
     retain: bool = False,
     client: BrokerClient | None = None,
@@ -40,6 +40,11 @@ def safe_publish(
         bidx = mqtt_client_info['broker_idx']
         broker = topics.get_broker_config(state, bidx)
         broker_name = broker.get('name', f'broker-{bidx}')
+
+        topic = topics.get_topic(state, topic_type, bidx)
+        if not topic:
+            continue
+
         try:
             broker_client = mqtt_client_info['client']
             qos = broker.get('qos', 0)
@@ -87,11 +92,10 @@ def publish_status(
 ) -> None:
     """Publish status message (NOT retained)."""
     status_msg = build_status_message(state, status, include_stats=True)
-    status_topic = topics.get_topic(state, "status", broker_idx)
-
+    
     if client:
-        safe_publish(state, status_topic, json.dumps(status_msg), retain=False, client=client, broker_idx=broker_idx)
+        safe_publish(state, "status", json.dumps(status_msg), retain=False, client=client, broker_idx=broker_idx)
     else:
-        safe_publish(state, status_topic, json.dumps(status_msg), retain=False)
+        safe_publish(state, "status", json.dumps(status_msg), retain=False)
 
     logger.debug(f"Published status: {status}")

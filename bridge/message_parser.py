@@ -50,9 +50,7 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
                 "type": "DEBUG",
                 "message": line
             })
-            debug_topic = topics.get_topic(state, "debug")
-            if debug_topic:
-                safe_publish(state, debug_topic, json.dumps(message))
+            safe_publish(state, "debug", json.dumps(message))
             return
 
     # Handle Packet messages (RX and TX)
@@ -90,6 +88,4 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
                 payload["path"] = packet_match.group(14)
 
         message.update(payload)
-        packets_topic = topics.get_topic(state, "packets")
-        if packets_topic:
-            safe_publish(state, packets_topic, json.dumps(message))
+        safe_publish(state, "packets", json.dumps(message))

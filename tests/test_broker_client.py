@@ -45,7 +45,7 @@ class TestSafePublish:
             ],
             repeater_pub_key="AA" * 32,
         )
-        result = safe_publish(state, "test/topic", '{"msg":"hello"}')
+        result = safe_publish(state, "packets", '{"msg":"hello"}')
         assert result is True
         assert len(broker1.published) == 1
         assert len(broker2.published) == 1
@@ -53,7 +53,7 @@ class TestSafePublish:
     def test_skips_when_not_connected(self):
         state = make_test_state()
         state.mqtt_connected = False
-        result = safe_publish(state, "test/topic", '{"msg":"hello"}')
+        result = safe_publish(state, "packets", '{"msg":"hello"}')
         assert result is False
         assert state.stats['publish_failures'] == 1
 
@@ -69,7 +69,7 @@ class TestSafePublish:
             ],
             repeater_pub_key="AA" * 32,
         )
-        result = safe_publish(state, "test/topic", '{"msg":"hello"}', client=broker1)
+        result = safe_publish(state, "packets", '{"msg":"hello"}', client=broker1)
         assert result is True
         assert len(broker1.published) == 1
         assert len(broker2.published) == 0
@@ -85,7 +85,7 @@ class TestSafePublish:
             broker_clients=[{"client": broker, "broker_idx": 0, "connected": True}],
             repeater_pub_key="AA" * 32,
         )
-        safe_publish(state, "test/topic", '{"msg":"hello"}')
+        safe_publish(state, "packets", '{"msg":"hello"}')
         assert broker.published[0][2] == 0  # qos forced to 0
 
 
