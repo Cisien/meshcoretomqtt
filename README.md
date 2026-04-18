@@ -130,6 +130,23 @@ services.mctomqtt = {
 
 The installer handles these dependencies automatically!
 
+## Testing
+
+Run the local test suite with:
+
+```bash
+python3 -m pytest tests/
+```
+
+Test tiers:
+
+- Default tests are pure unit tests.
+- Network tests are skipped with `MCTOMQTT_SKIP_NETWORK=1`.
+- System tests are skipped with `MCTOMQTT_SKIP_SYSTEM=1`.
+- End-to-end tests are opt-in with `MCTOMQTT_TEST_E2E=1`.
+
+Pull requests automatically run the GitHub Actions test workflow on Ubuntu. That job executes `python -m pytest tests/ -m "not e2e"`, which includes the normal unit suite plus any network/system tests that work in the runner, while still excluding opt-in e2e coverage that requires real services or devices.
+
 ## Directory Layout
 
 ```
@@ -516,4 +533,3 @@ Direct packet...
 Topic: meshcore/SEA/A1B2.../packets QoS: 0
 {"origin": "ag loft rpt", "origin_id": "A1B2...", "timestamp": "2025-03-15T23:09:00.710459", "type": "PACKET", "direction": "rx", "time": "23:08:59", "date": "15/3/2025", "len": "22", "packet_type": "2", "route": "D", "payload_len": "20", "raw": "0A1B2C...", "SNR": "5", "RSSI": "-93", "score": "1000", "hash": "890BFA3069FD1250", "path": "C2 -> E2"}
 ```
-
