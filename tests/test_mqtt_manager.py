@@ -93,6 +93,7 @@ class TestReconnectBehavior:
             "connecting_since": 0,
             "connect_time": 100,
             "reconnect_at": 0,
+            "reconnect_delay": 1.0,
             "failed_attempts": 0,
         }]
 
