@@ -134,6 +134,23 @@ services.mctomqtt = {
 
 The installer handles these dependencies automatically!
 
+## Testing
+
+Run the local test suite with:
+
+```bash
+python3 -m pytest tests/
+```
+
+Test tiers:
+
+- Default tests are pure unit tests.
+- Network tests are skipped with `MCTOMQTT_SKIP_NETWORK=1`.
+- System tests are skipped with `MCTOMQTT_SKIP_SYSTEM=1`.
+- End-to-end tests are opt-in with `MCTOMQTT_TEST_E2E=1`.
+
+Pull requests automatically run the GitHub Actions test workflow on Ubuntu. That job executes `python -m pytest tests/ -m "not e2e"`, which includes the normal unit suite plus any network/system tests that work in the runner, while still excluding opt-in e2e coverage that requires real services or devices.
+
 ## Directory Layout
 
 ```
