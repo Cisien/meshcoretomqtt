@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import socket as _socket
 import threading
 import time
 from typing import Any, TYPE_CHECKING
@@ -435,7 +436,12 @@ class MqttManager:
             return None
 
         try:
-            broker_client.connect(server, port, keepalive=keepalive)
+            _prior_timeout = _socket.getdefaulttimeout()
+            _socket.setdefaulttimeout(30)
+            try:
+                broker_client.connect(server, port, keepalive=keepalive)
+            finally:
+                _socket.setdefaulttimeout(_prior_timeout)
 
             if transport == "websockets":
                 state.ws_ping_threads[broker_idx] = {'active': True}
