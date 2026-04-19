@@ -68,7 +68,6 @@ class BridgeState:
         self.sync_time_at_start: bool = config.get('general', {}).get('sync_time', True)
 
         # Reconnect params
-        self.reconnect_delay: float = 1.0
         self.max_reconnect_delay: float = 120.0
         self.reconnect_backoff: float = 1.5
         self.max_reconnect_attempts: int = 12

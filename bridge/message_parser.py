@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 RAW_PATTERN = re.compile(r"(\d{2}:\d{2}:\d{2}) - (\d{1,2}/\d{1,2}/\d{4}) U RAW: (.*)")
 PACKET_PATTERN = re.compile(
     r"(\d{2}:\d{2}:\d{2}) - (\d{1,2}/\d{1,2}/\d{4}) U: (RX|TX), len=(\d+) \(type=(\d+), route=([A-Z]), payload_len=(\d+)\)"
-    r"(?: SNR=(-?\d+) RSSI=(-?\d+) score=(\d+)( time=(\d+))? hash=([0-9A-F]+)(?: \[(.*)\])?)?"
+    r"(?: SNR=(-?\d+) RSSI=(-?\d+) score=(\d+)(?: time=(\d+))?)?"
+    r"(?: hash=([0-9A-F]+))?"
+    r"(?: \[(.*)\])?$"
 )
 
 
@@ -80,12 +82,12 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
                 "SNR": packet_match.group(8),
                 "RSSI": packet_match.group(9),
                 "score": packet_match.group(10),
-                "duration": packet_match.group(12),
-                "hash": packet_match.group(13)
+                "duration": packet_match.group(11),
+                "hash": packet_match.group(12)
             })
 
-            if packet_match.group(6) == "D" and packet_match.group(14):
-                payload["path"] = packet_match.group(14)
+            if packet_match.group(6) == "D" and packet_match.group(13):
+                payload["path"] = packet_match.group(13)
 
         message.update(payload)
         safe_publish(state, "packets", json.dumps(message))

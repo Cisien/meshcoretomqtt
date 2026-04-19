@@ -1,6 +1,9 @@
 """Tests for MqttManager orchestration."""
 from __future__ import annotations
 
+import time
+from unittest.mock import patch
+
 import pytest
 
 from bridge.mqtt_manager import MqttManager
@@ -90,6 +93,7 @@ class TestReconnectBehavior:
             "connecting_since": 0,
             "connect_time": 100,
             "reconnect_at": 0,
+            "reconnect_delay": 1.0,
             "failed_attempts": 0,
         }]
 
@@ -97,3 +101,66 @@ class TestReconnectBehavior:
         # there's no real MQTT server, but it should clear the token cache
         manager.reconnect_disconnected_brokers()
         assert 0 not in state.token_cache
+
+    def test_backoff_is_independent_per_broker(self):
+        """Two brokers maintain separate reconnect_delay counters.
+
+        Broker 0 fails repeatedly so its backoff grows.
+        Broker 1 stays connected throughout, then disconnects.
+        Broker 1's reconnect_delay must still be 1.0 — unaffected by broker 0.
+        When broker 1 subsequently fails its first reconnect attempt its own
+        backoff starts at 1.0 and grows independently from broker 0's.
+        """
+        config = make_config()
+        config['broker'] = [
+            {'name': 'b0', 'enabled': True, 'server': 'host0', 'port': 1883,
+             'transport': 'tcp', 'qos': 0, 'retain': False,
+             'auth': {'method': 'none'}, 'tls': {'enabled': False}},
+            {'name': 'b1', 'enabled': True, 'server': 'host1', 'port': 1883,
+             'transport': 'tcp', 'qos': 0, 'retain': False,
+             'auth': {'method': 'none'}, 'tls': {'enabled': False}},
+        ]
+        state = make_test_state(config=config, repeater_name="Node", repeater_pub_key="AA" * 32)
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+
+        def make_client_info(idx, connected):
+            return {
+                'client': FakeBrokerClient(),
+                'broker_idx': idx,
+                'connected': connected,
+                'connecting_since': 0,
+                'connect_time': time.time() - 300 if connected else 0,
+                'reconnect_at': 0,
+                'reconnect_delay': 1.0,
+                'failed_attempts': 0,
+            }
+
+        state.mqtt_clients = [make_client_info(0, False), make_client_info(1, True)]
+        state.mqtt_connected = True
+
+        # Fail broker 0 five times — its delay should grow: 1.0 → 1.5 → 2.25 → 3.375 → 5.06 → 7.59
+        with patch.object(manager, '_create_and_connect_broker', return_value=None):
+            for _ in range(5):
+                state.mqtt_clients[0]['reconnect_at'] = 0
+                manager.reconnect_disconnected_brokers()
+
+        assert state.mqtt_clients[0]['reconnect_delay'] == pytest.approx(1.0 * 1.5 ** 5, rel=1e-3)
+        assert state.mqtt_clients[1]['reconnect_delay'] == 1.0, \
+            "broker 1 delay must be unaffected by broker 0 failures"
+
+        # Broker 1 disconnects — reconnect_at should use its own delay (1.0)
+        t_before = time.time()
+        manager.on_mqtt_disconnect(None, {'name': 'b1', 'broker_idx': 1}, None, 0, None)
+        t_after = time.time()
+
+        assert state.mqtt_clients[1]['reconnect_delay'] == 1.0
+        assert t_before + 1.0 <= state.mqtt_clients[1]['reconnect_at'] <= t_after + 1.0
+
+        # Broker 1 fails its first reconnect — its own backoff starts from 1.0
+        with patch.object(manager, '_create_and_connect_broker', return_value=None):
+            state.mqtt_clients[1]['reconnect_at'] = 0
+            manager.reconnect_disconnected_brokers()
+
+        assert state.mqtt_clients[1]['reconnect_delay'] == pytest.approx(1.5, rel=1e-3), \
+            "broker 1 first failure must grow from 1.0, not from broker 0's grown value"

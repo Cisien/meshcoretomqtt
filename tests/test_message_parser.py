@@ -31,6 +31,14 @@ class TestPacketPattern:
         assert match.group(9) == "-80"
         assert match.group(10) == "100"
 
+    def test_matches_current_repeater_rx_packet_without_hash(self):
+        line = "12:34:56 - 1/15/2025 U: RX, len=64 (type=1, route=D, payload_len=48) SNR=10 RSSI=-80 score=100 [BB -> AA]"
+        match = PACKET_PATTERN.match(line)
+        assert match is not None
+        assert match.group(3) == "RX"
+        assert match.group(12) is None
+        assert match.group(13) == "BB -> AA"
+
     def test_matches_tx_packet(self):
         line = "12:34:56 - 1/15/2025 U: TX, len=32 (type=2, route=F, payload_len=16)"
         match = PACKET_PATTERN.match(line)
@@ -103,6 +111,19 @@ class TestParseAndPublish:
         assert msg['SNR'] == "-5"
         assert msg['RSSI'] == "-100"
         assert msg['score'] == "50"
+
+    def test_parses_current_repeater_rx_packet_without_hash(self):
+        state, broker = self._make_state()
+        line = "12:34:56 - 1/15/2025 U: RX, len=64 (type=1, route=D, payload_len=48) SNR=10 RSSI=-80 score=100 [BB -> AA]"
+        parse_and_publish(state, line)
+        assert len(broker.published) == 1
+        msg = json.loads(broker.published[0][1])
+        assert msg['direction'] == "rx"
+        assert msg['SNR'] == "10"
+        assert msg['RSSI'] == "-80"
+        assert msg['score'] == "100"
+        assert msg.get('hash') is None
+        assert msg['path'] == "BB -> AA"
 
 
 class TestIataInPublishedTopics:
