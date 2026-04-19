@@ -133,3 +133,56 @@ class TestPublishStatus:
         assert len(broker.published) == 1
         topic = broker.published[0][0]
         assert "status" in topic
+
+    def test_multi_broker_topic_resolution(self):
+        """Verify that brokers with specific topic overrides use their own templates."""
+        broker0 = FakeBrokerClient()
+        broker0._connected = True
+        broker1 = FakeBrokerClient()
+        broker1._connected = True
+
+        config = make_config(broker=[
+            {
+                'name': 'broker0',
+                'enabled': True,
+                'server': 'localhost',
+                'port': 1883,
+                'topics': {
+                    'packets': 'brokerZero/{IATA}/packet',
+                    'iata': 'B0'
+                },
+                'auth': {'method': 'none'},
+                'tls': {'enabled': False},
+            },
+            {
+                'name': 'broker1',
+                'enabled': True,
+                'server': 'localhost',
+                'port': 1884,
+                'topics': {
+                    'packets': 'brokerOne/{IATA}/packet',
+                    'iata': 'B0'
+                },
+                'auth': {'method': 'none'},
+                'tls': {'enabled': False},
+            }
+        ])
+
+        state = make_test_state(
+            config=config,
+            broker_clients=[
+                {"client": broker0, "broker_idx": 0, "connected": True},
+                {"client": broker1, "broker_idx": 1, "connected": True},
+            ],
+            repeater_pub_key="AA" * 32,
+        )
+
+        result = safe_publish(state, "packets", '{"msg":"hello"}')
+
+        assert result is True
+        assert len(broker0.published) == 1
+        assert len(broker1.published) == 1
+
+        # Check that topics were resolved correctly using broker-specific IATA
+        assert broker0.published[0][0] == "brokerZero/B0/packet"
+        assert broker1.published[0][0] == "brokerOne/B0/packet"
