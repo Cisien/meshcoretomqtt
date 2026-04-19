@@ -14,7 +14,6 @@ class TestInstallerContext:
         assert ctx.config_dir == "/etc/mctomqtt"
         assert ctx.svc_user == "mctomqtt"
         assert ctx.script_version == "unknown"
-        assert ctx.decoder_available is False
         assert ctx.install_method == ""
         assert ctx.local_install == ""
         assert ctx.config_url == ""

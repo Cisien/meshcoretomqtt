@@ -40,7 +40,6 @@ class InstallerContext:
     config_dir: str = "/etc/mctomqtt"
     svc_user: str = "mctomqtt"
     script_version: str = "unknown"
-    decoder_available: bool = False
     install_method: str = ""  # "1" service, "2" docker, "3" manual
     local_install: str = ""  # LOCAL_INSTALL env var
     config_url: str = ""

@@ -572,8 +572,6 @@ User={svc_user}
 Group={svc_user}
 WorkingDirectory={install_dir}
 ExecStart={install_dir}/venv/bin/python3 {install_dir}/mctomqtt.py
-Environment="PATH={install_dir}/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="NVM_DIR={install_dir}/.nvm"
 Restart=always
 RestartSec=10
 NoNewPrivileges=true
@@ -648,13 +646,6 @@ def install_launchd_service(
     </array>
     <key>WorkingDirectory</key>
     <string>{install_dir}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>{install_dir}/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <key>NVM_DIR</key>
-        <string>{install_dir}/.nvm</string>
-    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -749,7 +740,7 @@ def install_docker_service(ctx: InstallerContext) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Python venv and meshcore-decoder
+# Python venv
 # ---------------------------------------------------------------------------
 
 def create_venv(install_dir: str, svc_user: str) -> None:
@@ -760,7 +751,7 @@ def create_venv(install_dir: str, svc_user: str) -> None:
     # Check if existing venv already has required packages
     try:
         result = run_cmd(
-            [venv_python, "-c", "import serial, paho.mqtt.client"],
+            [venv_python, "-c", "import serial, paho.mqtt.client, ed25519_orlp"],
             check=False, capture=True,
         )
         if result.returncode == 0:
@@ -788,53 +779,8 @@ def create_venv(install_dir: str, svc_user: str) -> None:
 
     print_info("Installing Python dependencies...")
     run_cmd([f"{venv_dir}/bin/pip", "install", "--quiet", "--upgrade", "pip"])
-    run_cmd([f"{venv_dir}/bin/pip", "install", "--quiet", "pyserial", "paho-mqtt"])
-    print_success("Python dependencies installed (pyserial, paho-mqtt)")
-
-
-def install_meshcore_decoder(install_dir: str, svc_user: str) -> bool:
-    """Install NVM, Node.js LTS, and meshcore-decoder. Returns True on success."""
-    print_info(f"Installing NVM and Node.js at {install_dir}/.nvm/...")
-    nvm_dir = f"{install_dir}/.nvm"
-
-    if platform.system() == "Darwin" or not svc_user:
-        # Install as current user
-        env = os.environ.copy()
-        env["NVM_DIR"] = nvm_dir
-        script = f"""
-            export NVM_DIR='{nvm_dir}'
-            [ -s "$NVM_DIR/nvm.sh" ] || curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | NVM_DIR='{nvm_dir}' bash
-            . "$NVM_DIR/nvm.sh" && nvm install --lts && nvm use --lts
-            npm install -g @michaelhart/meshcore-decoder
-            NODE_VERSION=$(node --version 2>/dev/null || true)
-            if [ -n "$NODE_VERSION" ] && [ -d '{nvm_dir}/versions/node/'"$NODE_VERSION" ]; then
-                ln -sfn '{nvm_dir}/versions/node/'"$NODE_VERSION" '{nvm_dir}/versions/node/current'
-            fi
-        """
-        result = run_cmd(["bash", "-c", script], check=False)
-    else:
-        # Install as service user
-        os.makedirs(nvm_dir, exist_ok=True)
-        chown_recursive(nvm_dir, svc_user, svc_user)
-
-        script = f"""
-            export NVM_DIR='{nvm_dir}'
-            [ -s "$NVM_DIR/nvm.sh" ] || curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | NVM_DIR='{nvm_dir}' bash
-            . "$NVM_DIR/nvm.sh" && nvm install --lts && nvm use --lts
-            npm install -g @michaelhart/meshcore-decoder
-            NODE_VERSION=$(node --version 2>/dev/null || true)
-            if [ -n "$NODE_VERSION" ] && [ -d '{nvm_dir}/versions/node/'"$NODE_VERSION" ]; then
-                ln -sfn '{nvm_dir}/versions/node/'"$NODE_VERSION" '{nvm_dir}/versions/node/current'
-            fi
-        """
-        result = run_cmd(["sudo", "-u", svc_user, "bash", "-c", script], check=False)
-
-    if result.returncode == 0:
-        print_success("meshcore-decoder installed")
-        return True
-    else:
-        print_warning("meshcore-decoder installation failed - may require manual install")
-        return False
+    run_cmd([f"{venv_dir}/bin/pip", "install", "--quiet", "pyserial", "paho-mqtt", "ed25519-orlp"])
+    print_success("Python dependencies installed (pyserial, paho-mqtt, ed25519-orlp)")
 
 
 # ---------------------------------------------------------------------------

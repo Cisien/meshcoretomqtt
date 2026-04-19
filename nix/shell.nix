@@ -13,8 +13,8 @@
           with ps; [
             paho-mqtt
             pyserial
+            ed25519-orlp
           ]))
-        self'.packages.meshcore-decoder
       ];
     };
   };

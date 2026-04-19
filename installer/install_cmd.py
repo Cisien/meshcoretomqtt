@@ -24,7 +24,6 @@ from .system import (
     download_repo_archive,
     install_docker_service,
     install_launchd_service,
-    install_meshcore_decoder,
     install_systemd_service,
     prompt_service_user,
     run_cmd,
@@ -155,10 +154,7 @@ def _do_install(ctx: InstallerContext, tmp_dir: str) -> None:
     # ---------------------------------------------------------------------------
     # Dependencies
     # ---------------------------------------------------------------------------
-    if ctx.install_method == "2":
-        # Docker includes meshcore-decoder
-        ctx.decoder_available = True
-    else:
+    if ctx.install_method != "2":
         print_header("Checking Dependencies")
 
         # Check Python 3.11+
@@ -167,14 +163,6 @@ def _do_install(ctx: InstallerContext, tmp_dir: str) -> None:
         # Set up venv
         print_info("Setting up Python virtual environment...")
         create_venv(ctx.install_dir, ctx.svc_user)
-
-        # Check for meshcore-decoder
-        ctx.decoder_available = False
-        if shutil.which("meshcore-decoder"):
-            print_success(f"meshcore-decoder found: {shutil.which('meshcore-decoder')}")
-            ctx.decoder_available = True
-        elif prompt_yes_no("Install meshcore-decoder for LetsMesh auth support?", "y"):
-            ctx.decoder_available = install_meshcore_decoder(ctx.install_dir, ctx.svc_user)
 
     # ---------------------------------------------------------------------------
     # Install files from repo
