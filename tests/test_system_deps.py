@@ -143,8 +143,9 @@ class TestSystemDeps:
             mock_warn.assert_any_call("Unsupported or unrecognized distribution: gentoo (like: none)")
 
     @patch("shutil.which", return_value=None)
+    @patch("installer.system.detect_linux_distro", return_value=(None, None))
     @patch("platform.system", return_value="Darwin")
-    def test_install_os_build_deps_non_linux(self, mock_sys, mock_which):
+    def test_install_os_build_deps_non_linux(self, mock_sys, mock_distro, mock_which):
         # On non-linux unknown distro, we just advise manual install
         with patch("installer.system.print_info") as mock_info:
             assert install_os_build_deps() is False
