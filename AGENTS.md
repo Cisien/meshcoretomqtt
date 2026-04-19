@@ -26,7 +26,7 @@ docker run -d --name mctomqtt --device=/dev/ttyACM0 \
 
 **NixOS:** `nix build` produces the default package. The flake also exports a NixOS module at `nixosModules.default`.
 
-**Tests:** `python3 -m pytest tests/` (requires `pytest>=7.0`, declared in `pyproject.toml[project.optional-dependencies.test]`). See the **Testing** section below for details.
+**Tests:** `python3 -m pytest tests/` (requires `pytest>=7.0`, declared in `pyproject.toml[project.optional-dependencies.test]`). GitHub Actions runs this on pull requests as a non-e2e test job. See the **Testing** section below for details.
 
 ## Architecture
 
@@ -119,6 +119,8 @@ See `config.toml.example` for the full reference with all options and defaults.
 - **`@pytest.mark.network`:** Tests needing internet (IATA API, download, bootstrap `--help`). Run by default; skip with `MCTOMQTT_SKIP_NETWORK=1`.
 - **`@pytest.mark.system`:** Tests needing root + Linux (permissions, service user creation, systemd). Auto-skipped when not root; also skip with `MCTOMQTT_SKIP_SYSTEM=1`.
 - **`@pytest.mark.e2e`:** Tests needing real services/devices. Opt-in only: `MCTOMQTT_TEST_E2E=1`.
+
+**PR CI:** `.github/workflows/pr-tests.yaml` runs on `pull_request` and executes `python -m pytest tests/ -m "not e2e"` on Ubuntu. This includes the default unit tests plus any network/system tests that are functional in the GitHub runner, while still excluding opt-in e2e coverage that needs real services or devices.
 
 **Conventions:**
 - Test files mirror the module they test (e.g., `test_validation.py` tests `installer/config.py` validation helpers).

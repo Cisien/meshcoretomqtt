@@ -132,10 +132,13 @@ class MqttManager:
             else:
                 mqtt_info['failed_attempts'] = failed_attempts + 1
                 jitter = random.uniform(-0.5, 0.5)
-                delay = max(0, state.reconnect_delay + jitter)
-                mqtt_info['reconnect_at'] = current_time + delay
-                state.reconnect_delay = min(state.reconnect_delay * state.reconnect_backoff, state.max_reconnect_delay)
+                mqtt_info['reconnect_at'] = time.time() + max(0, mqtt_info['reconnect_delay'] + jitter)
                 logger.warning(f"[{broker_name}] Failed to recreate client (attempt #{failed_attempts + 1}/{state.max_reconnect_attempts})")
+
+            mqtt_info['reconnect_delay'] = min(
+                mqtt_info['reconnect_delay'] * state.reconnect_backoff,
+                state.max_reconnect_delay
+            )
 
     def stop_websocket_ping_thread(self, broker_idx: int) -> None:
         """Cleanly stop the WebSocket ping thread for a broker."""
@@ -157,8 +160,6 @@ class MqttManager:
         broker_idx = userdata.get('broker_idx', None) if userdata else None
 
         if rc == 0:
-            state.reconnect_delay = 1.0
-
             mqtt_info = None
             for info in state.mqtt_clients:
                 if info['broker_idx'] == broker_idx:
@@ -176,6 +177,7 @@ class MqttManager:
             mqtt_info['connected'] = True
             mqtt_info['connecting_since'] = 0
             mqtt_info['connect_time'] = current_time
+            mqtt_info['reconnect_delay'] = 1.0
 
             if was_connected and not is_first_connect:
                 logger.info(f"[{broker_name}] Reconnected to broker")
@@ -234,7 +236,7 @@ class MqttManager:
                 already_disconnected = not info.get('connected', False)
                 info['connected'] = False
                 info['connecting_since'] = 0
-                info['reconnect_at'] = time.time() + state.reconnect_delay
+                info['reconnect_at'] = time.time() + info.get('reconnect_delay', 1.0)
 
                 connect_time = info.get('connect_time', 0)
                 if connect_time > 0 and (time.time() - connect_time) < 120:
@@ -456,6 +458,7 @@ class MqttManager:
                 'connecting_since': time.time(),
                 'connect_time': 0,
                 'reconnect_at': 0,
+                'reconnect_delay': 1.0,
                 'failed_attempts': 0
             }
         except Exception as e:
