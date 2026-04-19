@@ -25,7 +25,7 @@ def safe_publish(
 ) -> bool:
     """Publish to one or all MQTT brokers."""
     if not state.mqtt_connected:
-        logger.warning(f"Not connected - skipping publish to {topic}")
+        logger.warning(f"Not connected - skipping publish to {topic_type}")
         state.stats['publish_failures'] += 1
         return False
 
