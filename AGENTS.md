@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 meshcoretomqtt is a Python bridge that reads serial data from MeshCore LoRa repeaters and publishes parsed packets/debug data to one or more MQTT brokers. It runs as a long-lived daemon, typically deployed as a systemd/launchd service, Docker container, or NixOS module.
 
+**Environment note:** This software often runs on low-spec hardware (e.g. Raspberry Pi Zero) and at remote sites with low-bandwidth or high-latency connections. Network operations should use generous timeouts where appropriate.
+
 ## Running and Building
 
 **Run locally (no build step):**
@@ -14,7 +16,7 @@ python3 mctomqtt.py --config config.toml.example          # requires pyserial an
 python3 mctomqtt.py --config config.toml.example --debug    # enables DEBUG-level logging
 ```
 
-**Python dependencies:** `pyserial`, `paho-mqtt`, `ed25519-orlp` (install via pip or venv). Requires Python 3.11+ for `tomllib` stdlib.
+**Python dependencies:** `pyserial`, `paho-mqtt`, `ed25519-orlp` (install via pip or venv). Requires Python 3.11+ for `tomllib` stdlib. Note: `ed25519-orlp` may require a C toolchain and Python headers on Linux if a pre-compiled wheel is unavailable.
 
 **Docker:**
 ```bash
@@ -144,7 +146,7 @@ The installer is a Python package (`installer/`) with thin bash bootstraps. Pyth
 - **`__init__.py`** — `InstallerContext` dataclass (shared state: repo, branch, install_dir, config_dir, svc_user, etc.)
 - **`__main__.py`** — argparse entry point with `install`, `update`, `migrate` subcommands; calls `require_root()` after arg parsing
 - **`ui.py`** — ANSI color output (auto-detects TTY), prompts via `/dev/tty` (works with `curl | bash`)
-- **`system.py`** — `run_cmd()` subprocess wrapper (for external tools only: systemctl, docker, useradd, etc.), `require_root()`, `chown_recursive()`, user management, service management (systemd/launchd/Docker), serial device detection, venv/NVM setup, version info
+- **`system.py`** — `run_cmd()` subprocess wrapper (for external tools only: systemctl, docker, useradd, etc.), `require_root()`, `chown_recursive()`, user management, service management (systemd/launchd/Docker), serial device detection, venv setup. Note: Set `INSTALL_REBUILD_VENV=1` to force a full virtual environment rebuild.
 - **`config.py`** — Validation (email, pubkey, IATA), TOML generation, IATA API search via `urllib.request` + `json` (no jq dependency), interactive MQTT broker configuration flows
 - **`install_cmd.py`** — Fresh install orchestration (delegates to migrate/update when appropriate)
 - **`update_cmd.py`** — Update existing installation (file download, dependency refresh, config preservation, service restart)

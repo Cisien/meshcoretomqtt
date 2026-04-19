@@ -133,6 +133,11 @@ services.mctomqtt = {
 
 The installer handles these dependencies automatically!
 
+If a pre-compiled wheel for `ed25519-orlp` is not available for
+your platform, a C toolchain (gcc/make) and Python development
+headers are required for installation. The installer will attempt
+to detect and optionally install these for you.
+
 ## Testing
 
 Run the local test suite with:
