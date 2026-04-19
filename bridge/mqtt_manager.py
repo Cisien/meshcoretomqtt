@@ -434,11 +434,12 @@ class MqttManager:
             return None
 
         try:
+            _prior_timeout = _socket.getdefaulttimeout()
             _socket.setdefaulttimeout(30)
             try:
                 broker_client.connect(server, port, keepalive=keepalive)
             finally:
-                _socket.setdefaulttimeout(None)
+                _socket.setdefaulttimeout(_prior_timeout)
 
             if transport == "websockets":
                 state.ws_ping_threads[broker_idx] = {'active': True}
