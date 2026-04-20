@@ -19,6 +19,18 @@ PIWHEELS_JSON_RAW = """
 {
   "package": "ed25519-orlp",
   "releases": {
+    "0.1.2": {
+      "files": {
+        "ed25519_orlp-0.1.2-cp313-cp313-linux_armv6l.whl": {
+          "file_abi_tag": "cp313",
+          "platform": "linux_armv6l"
+        },
+        "ed25519_orlp-0.1.2-cp311-cp311-linux_armv7l.whl": {
+          "file_abi_tag": "cp311",
+          "platform": "linux_armv7l"
+        }
+      }
+    },
     "0.1.1": {
       "files": {
         "ed25519_orlp-0.1.1-cp313-cp313-linux_armv6l.whl": {
