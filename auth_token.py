@@ -11,7 +11,7 @@ import hashlib
 import time
 import sys
 from typing import Any
-from ed25519_orlp.ed25519 import ed25519_sign, ed25519_verify
+from ed25519_orlp import ed25519_sign, ed25519_verify
 
 def base64url_encode(data: bytes) -> str:
     """Base64url encode without padding"""
