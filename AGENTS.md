@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 meshcoretomqtt is a Python bridge that reads serial data from MeshCore LoRa repeaters and publishes parsed packets/debug data to one or more MQTT brokers. It runs as a long-lived daemon, typically deployed as a systemd/launchd service, Docker container, or NixOS module.
 
+**Environment note:** This software often runs on low-spec hardware (e.g. Raspberry Pi Zero) and at remote sites with low-bandwidth or high-latency connections. Network operations should use generous timeouts where appropriate.
+
 ## Running and Building
 
 **Run locally (no build step):**
@@ -14,9 +16,7 @@ python3 mctomqtt.py --config config.toml.example          # requires pyserial an
 python3 mctomqtt.py --config config.toml.example --debug    # enables DEBUG-level logging
 ```
 
-**Python dependencies:** `pyserial`, `paho-mqtt` (install via pip or venv). Requires Python 3.11+ for `tomllib` stdlib.
-
-**Optional dependency:** `meshcore-decoder` (Node.js CLI, `npm install -g @michaelhart/meshcore-decoder`) — required for JWT auth token generation/verification.
+**Python dependencies:** `pyserial`, `paho-mqtt`, `ed25519-orlp` (install via pip or venv). Requires Python 3.11+ for `tomllib` stdlib. Note: `ed25519-orlp` may require a C toolchain and Python headers on Linux if a pre-compiled wheel is unavailable.
 
 **Docker:**
 ```bash
@@ -50,7 +50,7 @@ The runtime codebase is a `bridge/` Python package with a thin entry point (proj
   - **`runner.py`** — `run()` main loop, `handle_signal()`, `wait_for_system_time_sync()`
   - **`__init__.py`** — `MeshCoreBridge` facade class
 
-- **`auth_token.py`** — Thin wrapper around the `meshcore-decoder` CLI for JWT operations (`create_auth_token`, `verify_auth_token`, `decode_token_payload`). All crypto is delegated to the external Node.js tool via `subprocess.run`.
+- **`auth_token.py`** — Provides JWT operations (`create_auth_token`, `verify_auth_token`, `decode_token_payload`) using `ed25519-orlp`.
 
 - **`config_loader.py`** — TOML config loading with layered override system.
 
@@ -89,8 +89,7 @@ See `config.toml.example` for the full reference with all options and defaults.
   config_loader.py
   bridge/                   # Application package
   .version_info
-  venv/                     # Python venv (pyserial, paho-mqtt)
-  .nvm/                     # NVM + Node LTS + meshcore-decoder
+  venv/                     # Python venv (pyserial, paho-mqtt, ed25519-orlp)
 
 /etc/mctomqtt/              # Config (owned root:mctomqtt, 750)
   config.toml               # Defaults (640, overwritten on updates)
@@ -101,7 +100,7 @@ See `config.toml.example` for the full reference with all options and defaults.
 ## Key Patterns
 
 - **Thread safety:** Serial port access is protected by internal locking in `RealSerialConnection`. The main loop, stats thread, and remote serial handler all call methods on the `SerialConnection` ABC — the lock is never exposed to callers.
-- **MQTT auth:** Two modes per broker — username/password or JWT auth tokens (generated from device's Ed25519 private key via meshcore-decoder). Tokens are cached with TTL. Auth operations go through the `AuthProvider` ABC.
+- **MQTT auth:** Two modes per broker — username/password or JWT auth tokens (generated from device's Ed25519 private key). Tokens are cached with TTL. Auth operations go through the `AuthProvider` ABC.
 - **Graceful shutdown:** SIGTERM/SIGINT handlers set `state.should_exit = True`. The main loop checks this flag each iteration.
 - **Config access:** `state.config` dict with `state.config.get('section', {}).get('key', default)`. Broker configs accessed via `topics.get_broker_config(state, broker_idx)`.
 - **Version:** `__version__` is defined at the top of `mctomqtt.py`. The `.version_info` JSON file (created by installer) appends git hash info. Version is passed to `MeshCoreBridge(config, debug, version)`.
@@ -147,7 +146,7 @@ The installer is a Python package (`installer/`) with thin bash bootstraps. Pyth
 - **`__init__.py`** — `InstallerContext` dataclass (shared state: repo, branch, install_dir, config_dir, svc_user, etc.)
 - **`__main__.py`** — argparse entry point with `install`, `update`, `migrate` subcommands; calls `require_root()` after arg parsing
 - **`ui.py`** — ANSI color output (auto-detects TTY), prompts via `/dev/tty` (works with `curl | bash`)
-- **`system.py`** — `run_cmd()` subprocess wrapper (for external tools only: systemctl, docker, useradd, etc.), `require_root()`, `chown_recursive()`, user management, service management (systemd/launchd/Docker), serial device detection, venv/NVM setup, version info
+- **`system.py`** — `run_cmd()` subprocess wrapper (for external tools only: systemctl, docker, useradd, etc.), `require_root()`, `chown_recursive()`, user management, service management (systemd/launchd/Docker), serial device detection, venv setup. Note: Set `INSTALL_REBUILD_VENV=1` to force a full virtual environment rebuild.
 - **`config.py`** — Validation (email, pubkey, IATA), TOML generation, IATA API search via `urllib.request` + `json` (no jq dependency), interactive MQTT broker configuration flows
 - **`install_cmd.py`** — Fresh install orchestration (delegates to migrate/update when appropriate)
 - **`update_cmd.py`** — Update existing installation (file download, dependency refresh, config preservation, service restart)
@@ -157,7 +156,7 @@ The installer is a Python package (`installer/`) with thin bash bootstraps. Pyth
 
 - **`pyproject.toml`** — Project metadata, Python version requirement (>=3.11), and pytest configuration.
 - **`uninstall.sh`** — Interactive uninstaller that detects the service user from the systemd unit, stops/removes the service, offers config backup, and cleans up `/opt/mctomqtt/` and `/etc/mctomqtt/`.
-- **`Dockerfile`** — Multi-stage Alpine build that includes Node.js runtime and meshcore-decoder. Config mounted at `/etc/mctomqtt/config.toml`.
+- **`Dockerfile`** — Alpine build that includes all Python dependencies. Config mounted at `/etc/mctomqtt/config.toml`.
 - **`mctomqtt.service`** — systemd unit template with security hardening (NoNewPrivileges, ProtectSystem, PrivateTmp).
 - **`com.meshcore.mctomqtt.plist`** — macOS launchd plist for system-level daemon at `/Library/LaunchDaemons/`.
 - **`configs/`** — User-contributed configuration examples.

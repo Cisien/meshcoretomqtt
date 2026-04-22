@@ -24,7 +24,6 @@ from .system import (
     docker_cmd,
     download_repo_archive,
     install_launchd_service,
-    install_meshcore_decoder,
     install_systemd_service,
     pull_or_build_docker_image,
     run_cmd,
@@ -142,18 +141,6 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     if system_type != "docker":
         print_header("Updating Dependencies")
         create_venv(ctx.install_dir, ctx.svc_user)
-
-        # Check meshcore-decoder
-        result = run_cmd(["which", "meshcore-decoder"], check=False, capture=True)
-        if result.returncode == 0:
-            ctx.decoder_available = True
-        else:
-            # Check in NVM path
-            nvm_decoder = Path(ctx.install_dir) / ".nvm" / "versions" / "node" / "current" / "bin" / "meshcore-decoder"
-            if nvm_decoder.exists():
-                ctx.decoder_available = True
-    else:
-        ctx.decoder_available = True
 
     # ---------------------------------------------------------------------------
     # Configuration

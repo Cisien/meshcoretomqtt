@@ -84,7 +84,7 @@ branch = "main"
 #
 # Auth methods:
 #   "password" - username/password authentication
-#   "token"    - MeshCore auth token (requires meshcore-decoder)
+#   "token"    - MeshCore auth token (JWT from device Ed25519 key)
 #   "none"     - anonymous connection
 
 # --- LetsMesh US broker with auth token ---

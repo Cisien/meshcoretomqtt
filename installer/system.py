@@ -50,6 +50,158 @@ def run_cmd(
     )
 
 
+# ---------------------------------------------------------------------------
+# Network helpers
+# ---------------------------------------------------------------------------
+
+def http_get(url: str, timeout: int = 30) -> bytes | None:
+    """Make an HTTP GET request and return the response body."""
+    import urllib.request
+    import urllib.error
+
+    req = urllib.request.Request(url, headers={"User-Agent": "meshcoretomqtt-installer"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+def check_piwheels_available(package_name: str) -> bool:
+    """Check if a wheel for the current platform is available on piwheels.org."""
+    import sys
+
+    url = f"https://www.piwheels.org/project/{package_name}/json/"
+    data_bytes = http_get(url)
+    if not data_bytes:
+        return False
+
+    try:
+        data = json.loads(data_bytes)
+        # Get major.minor version e.g. "3.11" -> "311"
+        py_ver = f"{sys.version_info.major}{sys.version_info.minor}"
+        uname = platform.uname()
+        system = uname.system.lower()
+        machine = uname.machine.lower()
+
+        # Construct target platform string (e.g., linux_armv7l, linux_armv6l, linux_aarch64)
+        target_platform = f"{system}_{machine}"
+
+        for version, ver_data in data.get("releases", {}).items():
+            files = ver_data.get("files", {})
+            for filename, file_info in files.items():
+                # Check for matching python version and platform tags
+                # Use metadata from file_info if available, else parse filename
+                file_abi = file_info.get("file_abi_tag", "")
+                file_platform = file_info.get("platform", "")
+
+                if not file_abi or not file_platform:
+                    # Fallback to filename parsing if metadata is missing
+                    if f"cp{py_ver}" in filename and target_platform in filename:
+                        return True
+                elif f"cp{py_ver}" == file_abi and target_platform == file_platform:
+                    return True
+    except (json.JSONDecodeError, KeyError):
+        pass
+
+    return False
+
+
+def detect_linux_distro() -> tuple[str | None, str | None]:
+    """Detect Linux distribution ID and ID_LIKE from /etc/os-release."""
+    os_release = Path("/etc/os-release")
+    if not os_release.exists():
+        return None, None
+
+    dist_id = None
+    dist_like = None
+    try:
+        content = os_release.read_text()
+        for line in content.splitlines():
+            if line.startswith("ID="):
+                dist_id = line.split("=")[1].strip('"').lower()
+            elif line.startswith("ID_LIKE="):
+                dist_like = line.split("=")[1].strip('"').lower()
+    except OSError:
+        pass
+    return dist_id, dist_like
+
+
+def install_os_build_deps() -> bool:
+    """Check for and optionally install OS build dependencies for C extensions."""
+    # Check if we already have the necessary tools
+    cc_present = shutil.which("cc") or shutil.which("gcc")
+    make_present = shutil.which("make")
+
+    if cc_present and make_present:
+        print_success("Build tools (C compiler and make) are already installed")
+        return True
+
+    print_warning("Build tools (C compiler and make) are missing")
+    print_info("These may be required to install ed25519-orlp.")
+
+    # Check for pre-compiled wheel fallback
+    if check_piwheels_available("ed25519-orlp"):
+        print_success("A pre-compiled wheel was found on piwheels.org for this platform, so build tools may not be needed")
+        if not prompt_yes_no("Install build tools anyway?", "n"):
+            print_info("Skipping toolchain installation (expecting pip to use pre-compiled wheel)")
+            return True
+
+    # Distro-specific package names
+    distro_deps = {
+        "debian": ("apt-get", ["build-essential", "python3-dev"]),
+        "ubuntu": ("apt-get", ["build-essential", "python3-dev"]),
+        "raspbian": ("apt-get", ["build-essential", "python3-dev"]),
+        "arch": ("pacman", ["-S", "--needed", "base-devel"]),
+        "fedora": ("dnf", ["install", "gcc", "python3-devel", "make"]),
+        "rhel": ("dnf", ["install", "gcc", "python3-devel", "make"]),
+        "centos": ("dnf", ["install", "gcc", "python3-devel", "make"]),
+        "alpine": ("apk", ["add", "--no-cache", "build-base", "python3-dev"]),
+    }
+
+    dist_id, dist_like = detect_linux_distro()
+
+    # Try ID first, then fall back to ID_LIKE
+    target_distro = None
+    if dist_id in distro_deps:
+        target_distro = dist_id
+    elif dist_like:
+        # ID_LIKE can be a space-separated list
+        for like in dist_like.split():
+            if like in distro_deps:
+                target_distro = like
+                break
+
+    if not target_distro:
+        # If we aren't on a recognized Linux distro, don't try to install anything
+        if platform.system() == "Linux":
+            print_warning(f"Unsupported or unrecognized distribution: {dist_id or 'unknown'} (like: {dist_like or 'none'})")
+
+        print_info("Please manually install a C toolchain and Python headers if the installation fails.")
+        return False
+
+    pkg_manager, args = distro_deps[target_distro]
+    pkg_list = " ".join(args)
+
+    print_info(f"Detected distribution: {dist_id or 'unknown'} (supported via: {target_distro})")
+    if prompt_yes_no(f"Install build dependencies ({pkg_list}) via {pkg_manager}?", "y"):
+        try:
+            if pkg_manager == "apt-get":
+                run_cmd(["apt-get", "update", "-qq"], check=True)
+                run_cmd(["apt-get", "install", "-y", "-qq"] + args, check=True)
+            elif pkg_manager == "pacman":
+                run_cmd(["pacman", "-Sy", "--noconfirm"] + args[1:], check=True)
+            else:
+                run_cmd([pkg_manager] + args + ["-y"], check=True)
+            print_success("Build dependencies installed successfully")
+            return True
+        except subprocess.CalledProcessError as e:
+            print_error(f"Failed to install build dependencies: {e}")
+            return False
+
+    return False
+
+
 def require_root() -> None:
     """Verify the installer is running as root."""
     if os.getuid() != 0:
@@ -572,8 +724,6 @@ User={svc_user}
 Group={svc_user}
 WorkingDirectory={install_dir}
 ExecStart={install_dir}/venv/bin/python3 {install_dir}/mctomqtt.py
-Environment="PATH={install_dir}/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="NVM_DIR={install_dir}/.nvm"
 Restart=always
 RestartSec=10
 NoNewPrivileges=true
@@ -648,13 +798,6 @@ def install_launchd_service(
     </array>
     <key>WorkingDirectory</key>
     <string>{install_dir}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>{install_dir}/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <key>NVM_DIR</key>
-        <string>{install_dir}/.nvm</string>
-    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -749,7 +892,7 @@ def install_docker_service(ctx: InstallerContext) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Python venv and meshcore-decoder
+# Python venv
 # ---------------------------------------------------------------------------
 
 def create_venv(install_dir: str, svc_user: str) -> None:
@@ -758,16 +901,19 @@ def create_venv(install_dir: str, svc_user: str) -> None:
     venv_python = f"{venv_dir}/bin/python3"
 
     # Check if existing venv already has required packages
-    try:
-        result = run_cmd(
-            [venv_python, "-c", "import serial, paho.mqtt.client"],
-            check=False, capture=True,
-        )
-        if result.returncode == 0:
-            print_success("Using existing virtual environment")
-            return
-    except FileNotFoundError:
-        pass  # venv doesn't exist yet — create it below
+    if not os.environ.get("INSTALL_REBUILD_VENV"):
+        try:
+            result = run_cmd(
+                [venv_python, "-c", "import serial, paho.mqtt.client, ed25519_orlp"],
+                check=False, capture=True,
+            )
+            if result.returncode == 0:
+                print_success("Using existing virtual environment")
+                return
+        except FileNotFoundError:
+            pass  # venv doesn't exist yet — create it below
+    else:
+        print_info("INSTALL_REBUILD_VENV set - forcing virtual environment rebuild")
 
     # Create new venv
     shutil.rmtree(venv_dir, ignore_errors=True)
@@ -786,55 +932,13 @@ def create_venv(install_dir: str, svc_user: str) -> None:
 
     print_success(f"Virtual environment created at {venv_dir}")
 
+    # In case ed25519-orlp needs to be built from source
+    install_os_build_deps()
+
     print_info("Installing Python dependencies...")
     run_cmd([f"{venv_dir}/bin/pip", "install", "--quiet", "--upgrade", "pip"])
-    run_cmd([f"{venv_dir}/bin/pip", "install", "--quiet", "pyserial", "paho-mqtt"])
-    print_success("Python dependencies installed (pyserial, paho-mqtt)")
-
-
-def install_meshcore_decoder(install_dir: str, svc_user: str) -> bool:
-    """Install NVM, Node.js LTS, and meshcore-decoder. Returns True on success."""
-    print_info(f"Installing NVM and Node.js at {install_dir}/.nvm/...")
-    nvm_dir = f"{install_dir}/.nvm"
-
-    if platform.system() == "Darwin" or not svc_user:
-        # Install as current user
-        env = os.environ.copy()
-        env["NVM_DIR"] = nvm_dir
-        script = f"""
-            export NVM_DIR='{nvm_dir}'
-            [ -s "$NVM_DIR/nvm.sh" ] || curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | NVM_DIR='{nvm_dir}' bash
-            . "$NVM_DIR/nvm.sh" && nvm install --lts && nvm use --lts
-            npm install -g @michaelhart/meshcore-decoder
-            NODE_VERSION=$(node --version 2>/dev/null || true)
-            if [ -n "$NODE_VERSION" ] && [ -d '{nvm_dir}/versions/node/'"$NODE_VERSION" ]; then
-                ln -sfn '{nvm_dir}/versions/node/'"$NODE_VERSION" '{nvm_dir}/versions/node/current'
-            fi
-        """
-        result = run_cmd(["bash", "-c", script], check=False)
-    else:
-        # Install as service user
-        os.makedirs(nvm_dir, exist_ok=True)
-        chown_recursive(nvm_dir, svc_user, svc_user)
-
-        script = f"""
-            export NVM_DIR='{nvm_dir}'
-            [ -s "$NVM_DIR/nvm.sh" ] || curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | NVM_DIR='{nvm_dir}' bash
-            . "$NVM_DIR/nvm.sh" && nvm install --lts && nvm use --lts
-            npm install -g @michaelhart/meshcore-decoder
-            NODE_VERSION=$(node --version 2>/dev/null || true)
-            if [ -n "$NODE_VERSION" ] && [ -d '{nvm_dir}/versions/node/'"$NODE_VERSION" ]; then
-                ln -sfn '{nvm_dir}/versions/node/'"$NODE_VERSION" '{nvm_dir}/versions/node/current'
-            fi
-        """
-        result = run_cmd(["sudo", "-u", svc_user, "bash", "-c", script], check=False)
-
-    if result.returncode == 0:
-        print_success("meshcore-decoder installed")
-        return True
-    else:
-        print_warning("meshcore-decoder installation failed - may require manual install")
-        return False
+    run_cmd([f"{venv_dir}/bin/pip", "install", "--quiet", "pyserial", "paho-mqtt", "ed25519-orlp"])
+    print_success("Python dependencies installed (pyserial, paho-mqtt, ed25519-orlp)")
 
 
 # ---------------------------------------------------------------------------

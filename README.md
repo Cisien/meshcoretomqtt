@@ -130,9 +130,13 @@ services.mctomqtt = {
 ### Software Requirements
 
 - Python 3.11 or higher (required for `tomllib` stdlib module)
-- For auth token support (optional): Node.js and `@michaelhart/meshcore-decoder`
 
 The installer handles these dependencies automatically!
+
+If a pre-compiled wheel for `ed25519-orlp` is not available for
+your platform, a C toolchain (gcc/make) and Python development
+headers are required for installation. The installer will attempt
+to detect and optionally install these for you.
 
 ## Testing
 
@@ -160,8 +164,7 @@ Pull requests automatically run the GitHub Actions test workflow on Ubuntu. That
   auth_token.py
   config_loader.py
   .version_info
-  venv/                     # Python venv (pyserial, paho-mqtt)
-  .nvm/                     # NVM + Node LTS + meshcore-decoder
+  venv/                     # Python venv (pyserial, paho-mqtt, ed25519-orlp)
 
 /etc/mctomqtt/              # Config (owned root:mctomqtt, 755)
   config.toml               # Defaults (644, OVERWRITTEN on updates)
@@ -298,8 +301,7 @@ password = "your_password"
 
 ### 2. Auth Token (Public Key Based)
 
-Requires `@michaelhart/meshcore-decoder` and firmware supporting `get prv.key`
-command.
+Requires firmware supporting the `get prv.key` command (v1.8.0 or later).
 
 ```toml
 [[broker]]
@@ -326,14 +328,6 @@ The script will:
 **Note:** The private key is read directly from the device and used for signing
 only. It's never transmitted or saved to disk.
 
-To install meshcore-decoder:
-
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-# Restart shell or: source ~/.bashrc
-nvm install --lts
-npm install -g @michaelhart/meshcore-decoder
-```
 
 ### Additional Settings
 

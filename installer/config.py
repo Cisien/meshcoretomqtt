@@ -446,7 +446,7 @@ def prompt_allowed_companions(existing: str = "") -> str:
 # Configure custom broker (interactive)
 # ---------------------------------------------------------------------------
 
-def configure_custom_broker(broker_num: int, config_dir: str, decoder_available: bool) -> None:
+def configure_custom_broker(broker_num: int, config_dir: str) -> None:
     """Configure a single custom MQTT broker interactively."""
     user_toml = f"{config_dir}/config.d/00-user.toml"
 
@@ -471,7 +471,7 @@ def configure_custom_broker(broker_num: int, config_dir: str, decoder_available:
     print()
     print_info("Authentication method:")
     print("  1) Username/Password")
-    print("  2) MeshCore Auth Token (requires meshcore-decoder)")
+    print("  2) MeshCore Auth Token")
     print("  3) None (anonymous)")
     auth_choice = prompt_input("Choose authentication method [1-3]", "1")
 
@@ -479,24 +479,20 @@ def configure_custom_broker(broker_num: int, config_dir: str, decoder_available:
     username = password = audience = owner = email = ""
 
     if auth_choice == "2":
-        if not decoder_available:
-            print_error("meshcore-decoder not available - using username/password instead")
-            auth_choice = "1"
-        else:
-            auth_method = "token"
-            audience = prompt_input("Token audience (optional)")
-            owner = prompt_owner_pubkey()
-            email = prompt_owner_email()
+        auth_method = "token"
+        audience = prompt_input("Token audience (optional)")
+        owner = prompt_owner_pubkey()
+        email = prompt_owner_email()
 
-            parts = []
-            if owner and email:
-                parts.append(f"Owner info set: {owner} ({email})")
-            elif owner:
-                parts.append(f"Owner public key set: {owner}")
-            elif email:
-                parts.append(f"Owner email set: {email}")
-            if parts:
-                print_success(parts[0])
+        parts = []
+        if owner and email:
+            parts.append(f"Owner info set: {owner} ({email})")
+        elif owner:
+            parts.append(f"Owner public key set: {owner}")
+        elif email:
+            parts.append(f"Owner email set: {email}")
+        if parts:
+            print_success(parts[0])
 
     if auth_choice == "1":
         auth_method = "password"
@@ -534,74 +530,60 @@ def configure_mqtt_brokers(ctx: InstallerContext) -> None:
     print("  - Real-time packet analysis and visualization")
     print("  - Network health monitoring")
     print("  - Includes US and EU regional brokers for redundancy")
-    print("  - Requires meshcore-decoder for authentication")
     print()
 
-    if ctx.decoder_available:
-        if prompt_yes_no("Enable LetsMesh Packet Analyzer MQTT servers?", "y"):
-            # LetsMesh IATA selection via API (no jq needed!)
-            existing_iata = _read_existing_iata(user_toml)
-            if not existing_iata or existing_iata == "XXX":
-                iata = prompt_iata_letsmesh("", ctx.script_version)
-                _update_iata_in_file(user_toml, iata)
-                print_success(f"IATA code set to: {iata}")
+    if prompt_yes_no("Enable LetsMesh Packet Analyzer MQTT servers?", "y"):
+        # LetsMesh IATA selection via API (no jq needed!)
+        existing_iata = _read_existing_iata(user_toml)
+        if not existing_iata or existing_iata == "XXX":
+            iata = prompt_iata_letsmesh("", ctx.script_version)
+            _update_iata_in_file(user_toml, iata)
+            print_success(f"IATA code set to: {iata}")
 
-            # Prompt for owner info
-            print()
-            print_info("LetsMesh Packet Analyzer supports optional owner identification")
-            print_info("This links your observer to your MeshCore public key and email")
-            owner_pubkey = prompt_owner_pubkey()
-            owner_email = prompt_owner_email()
-            allowed_companions = prompt_allowed_companions()
+        # Prompt for owner info
+        print()
+        print_info("LetsMesh Packet Analyzer supports optional owner identification")
+        print_info("This links your observer to your MeshCore public key and email")
+        owner_pubkey = prompt_owner_pubkey()
+        owner_email = prompt_owner_email()
+        allowed_companions = prompt_allowed_companions()
 
-            # Configure US and EU brokers
-            append_letsmesh_broker_toml(
-                user_toml, "letsmesh-us",
-                "mqtt-us-v1.letsmesh.net", "mqtt-us-v1.letsmesh.net",
-                owner_pubkey, owner_email,
-            )
-            append_letsmesh_broker_toml(
-                user_toml, "letsmesh-eu",
-                "mqtt-eu-v1.letsmesh.net", "mqtt-eu-v1.letsmesh.net",
-                owner_pubkey, owner_email,
-            )
+        # Configure US and EU brokers
+        append_letsmesh_broker_toml(
+            user_toml, "letsmesh-us",
+            "mqtt-us-v1.letsmesh.net", "mqtt-us-v1.letsmesh.net",
+            owner_pubkey, owner_email,
+        )
+        append_letsmesh_broker_toml(
+            user_toml, "letsmesh-eu",
+            "mqtt-eu-v1.letsmesh.net", "mqtt-eu-v1.letsmesh.net",
+            owner_pubkey, owner_email,
+        )
 
-            if allowed_companions:
-                append_remote_serial_toml(user_toml, allowed_companions)
-                count = len([k for k in allowed_companions.split(",") if k.strip()])
-                print_success(f"Remote serial access enabled with {count} companion(s)")
+        if allowed_companions:
+            append_remote_serial_toml(user_toml, allowed_companions)
+            count = len([k for k in allowed_companions.split(",") if k.strip()])
+            print_success(f"Remote serial access enabled with {count} companion(s)")
 
-            # Build success message
-            owner_info = ""
-            if owner_pubkey and owner_email:
-                owner_info = f" with owner: {owner_pubkey} ({owner_email})"
-            elif owner_pubkey:
-                owner_info = f" with owner: {owner_pubkey}"
-            elif owner_email:
-                owner_info = f" with email: {owner_email}"
-            print_success(f"LetsMesh Packet Analyzer MQTT servers enabled{owner_info}")
+        # Build success message
+        owner_info = ""
+        if owner_pubkey and owner_email:
+            owner_info = f" with owner: {owner_pubkey} ({owner_email})"
+        elif owner_pubkey:
+            owner_info = f" with owner: {owner_pubkey}"
+        elif owner_email:
+            owner_info = f" with email: {owner_email}"
+        print_success(f"LetsMesh Packet Analyzer MQTT servers enabled{owner_info}")
 
-            if prompt_yes_no("Would you like to configure additional MQTT brokers?", "n"):
-                _configure_additional_brokers(ctx)
-        else:
-            # User declined LetsMesh — disable both default brokers
-            append_disabled_broker_toml(user_toml, "letsmesh-us")
-            append_disabled_broker_toml(user_toml, "letsmesh-eu")
-            if prompt_yes_no("Would you like to configure a custom MQTT broker?", "y"):
-                _configure_iata_simple(user_toml)
-                configure_custom_broker(1, ctx.config_dir, ctx.decoder_available)
-                if prompt_yes_no("Would you like to configure additional MQTT brokers?", "n"):
-                    _configure_additional_brokers(ctx)
-            else:
-                print_warning(f"No MQTT brokers configured - you'll need to edit {user_toml} manually")
+        if prompt_yes_no("Would you like to configure additional MQTT brokers?", "n"):
+            _configure_additional_brokers(ctx)
     else:
-        # No decoder available — LetsMesh brokers can't work, disable them
+        # User declined LetsMesh — disable both default brokers
         append_disabled_broker_toml(user_toml, "letsmesh-us")
         append_disabled_broker_toml(user_toml, "letsmesh-eu")
-        print_warning("meshcore-decoder not available - cannot use LetsMesh auth token authentication")
-        if prompt_yes_no("Would you like to configure a custom MQTT broker with username/password?", "y"):
+        if prompt_yes_no("Would you like to configure a custom MQTT broker?", "y"):
             _configure_iata_simple(user_toml)
-            configure_custom_broker(1, ctx.config_dir, ctx.decoder_available)
+            configure_custom_broker(1, ctx.config_dir)
             if prompt_yes_no("Would you like to configure additional MQTT brokers?", "n"):
                 _configure_additional_brokers(ctx)
         else:
@@ -640,7 +622,7 @@ def _configure_additional_brokers(ctx: InstallerContext) -> None:
 
     for i in range(num_additional):
         broker_num = existing_count + i + 1
-        configure_custom_broker(broker_num, ctx.config_dir, ctx.decoder_available)
+        configure_custom_broker(broker_num, ctx.config_dir)
 
 
 # ---------------------------------------------------------------------------

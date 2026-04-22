@@ -22,7 +22,7 @@ class AuthProvider(ABC):
 
 
 class MeshCoreAuthProvider(AuthProvider):
-    """Concrete auth provider delegating to meshcore-decoder CLI via auth_token.py."""
+    """Concrete auth provider using auth_token."""
 
     def create_token(self, public_key_hex: str, private_key_hex: str,
                      expiry_seconds: int = 3600, **claims: Any) -> str:

@@ -5,18 +5,6 @@
 #     --device=/dev/ttyACM0 \
 #     meshcoretomqtt:latest
 
-
-# Builder stage for Node.js and meshcore-decoder
-FROM alpine:latest AS builder
-
-WORKDIR /build
-
-# Install Node.js and npm
-RUN apk add --no-cache nodejs npm
-
-# Install meshcore-decoder
-RUN npm install -g @michaelhart/meshcore-decoder
-
 # Final stage
 FROM python:3.11-alpine
 
@@ -25,16 +13,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/mctomqtt/
 
-# Install dependencies including Node.js runtime
-RUN apk add --no-cache \
+# Install dependencies
+# We add build-base and python3-dev to compile ed25519-orlp, then remove them
+RUN apk add --no-cache --virtual .build-deps \
+    build-base \
+    python3-dev \
+    && apk add --no-cache \
     curl \
     libstdc++ \
     libgcc \
-    nodejs \
-    && pip3 install pyserial paho-mqtt --no-cache-dir
+    && pip3 install pyserial paho-mqtt ed25519-orlp --no-cache-dir \
+    && apk del .build-deps
 
-# Copy the entire Node structure from builder to ensure symlinks and paths remain valid
-COPY --from=builder /usr/local /usr/local
 # Copy application files
 COPY ./mctomqtt.py ./auth_token.py ./config_loader.py /opt/mctomqtt/
 COPY ./bridge/ /opt/mctomqtt/bridge/
