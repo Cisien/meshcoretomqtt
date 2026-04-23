@@ -16,6 +16,7 @@ from .config import configure_mqtt_brokers, update_owner_info
 from .system import (
     LOCAL_IMAGE,
     check_service_health,
+    cleanup_legacy_nvm,
     create_system_user,
     create_version_info,
     create_venv,
@@ -141,6 +142,7 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     if system_type != "docker":
         print_header("Updating Dependencies")
         create_venv(ctx.install_dir, ctx.svc_user)
+        cleanup_legacy_nvm(ctx.install_dir)
 
     # ---------------------------------------------------------------------------
     # Configuration

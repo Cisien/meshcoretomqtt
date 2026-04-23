@@ -9,8 +9,7 @@ User=mctomqtt
 Group=mctomqtt
 WorkingDirectory=/opt/mctomqtt
 ExecStart=/opt/mctomqtt/venv/bin/python3 /opt/mctomqtt/mctomqtt.py
-Environment="PATH=/opt/mctomqtt/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="NVM_DIR=/opt/mctomqtt/.nvm"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Restart=always
 RestartSec=10
 NoNewPrivileges=true

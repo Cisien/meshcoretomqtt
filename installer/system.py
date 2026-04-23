@@ -895,6 +895,29 @@ def install_docker_service(ctx: InstallerContext) -> bool:
 # Python venv
 # ---------------------------------------------------------------------------
 
+def cleanup_legacy_nvm(install_dir: str) -> None:
+    """Offer to remove the legacy .nvm/ directory left behind by pre-1.2 installs.
+
+    Older installers ran meshcore-decoder via Node.js and placed NVM under
+    {install_dir}/.nvm/. The Python ed25519-orlp replacement makes that
+    tree obsolete; prompt the user before deleting it.
+    """
+    nvm_dir = Path(install_dir) / ".nvm"
+    if not nvm_dir.is_dir():
+        return
+
+    print_info(f"Legacy Node.js/NVM directory found at {nvm_dir}")
+    print_info("This is no longer used (meshcore-decoder was replaced by ed25519-orlp).")
+    if prompt_yes_no(f"Remove {nvm_dir}?", "y"):
+        shutil.rmtree(str(nvm_dir), ignore_errors=True)
+        if nvm_dir.exists():
+            print_warning(f"Failed to fully remove {nvm_dir} - please remove manually")
+        else:
+            print_success(f"Removed {nvm_dir}")
+    else:
+        print_info(f"Keeping {nvm_dir}")
+
+
 def create_venv(install_dir: str, svc_user: str) -> None:
     """Create Python virtual environment and install dependencies."""
     venv_dir = f"{install_dir}/venv"
