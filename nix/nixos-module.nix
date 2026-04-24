@@ -90,6 +90,12 @@
     syncTime = cfg.settings.sync-time or true;
     serialBaudRate = cfg.settings.serial-baud-rate or 115200;
     serialTimeout = cfg.settings.serial-timeout or 2;
+    tcpSerialEnabled = cfg.tcpSerial.enable;
+    tcpSerialAddress = cfg.tcpSerial.address;
+    serialDevicePaths =
+      if tcpSerialEnabled
+      then []
+      else lib.filter (port: lib.hasPrefix "/dev/" port) cfg.serialPorts;
 
     # Build the full TOML config structure
     tomlConfig = {
@@ -99,10 +105,16 @@
         sync_time = syncTime;
       };
 
-      serial = {
-        ports = cfg.serialPorts;
-        baud_rate = serialBaudRate;
-        timeout = serialTimeout;
+      serial =
+        {
+          ports = cfg.serialPorts;
+          baud_rate = serialBaudRate;
+          timeout = serialTimeout;
+        };
+
+      tcp_serial = {
+        enabled = tcpSerialEnabled;
+        address = tcpSerialAddress;
       };
 
       topics = {
@@ -148,6 +160,21 @@
         default = ["/dev/ttyACM0"];
         description = "Serial ports to listen on (will be available to the mctomqtt user)";
         example = ["/dev/ttyACM0" "/dev/ttyACM1"];
+      };
+
+      tcpSerial = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = "Use a TCP serial stream instead of local serial ports";
+        };
+
+        address = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          example = ["socket://192.168.1.123:4403"];
+          description = "TCP serial stream addresses";
+        };
       };
 
       brokers = lib.mkOption {
@@ -212,6 +239,10 @@
           assertion = cfg.package != null;
           message = "mctomqtt package not found. Either set services.mctomqtt.package or ensure the flake outputs a package for system ${pkgs.system}";
         }
+        {
+          assertion = (!cfg.tcpSerial.enable) || (cfg.tcpSerial.address != []);
+          message = "services.mctomqtt.tcpSerial.address must be set when tcpSerial.enable is true";
+        }
       ];
       # Create system user and group
       users.users.mctomqtt = {
@@ -252,12 +283,12 @@
               "/var/cache/mctomqtt"
               "/var/log/mctomqtt"
             ]
-            ++ cfg.serialPorts;
+            ++ serialDevicePaths;
         };
 
-        # Ensure serial devices are available
-        requires = map (port: "dev-${lib.replaceStrings ["/dev/"] [""] port}.device") cfg.serialPorts;
-        after = ["network.target"] ++ map (port: "dev-${lib.replaceStrings ["/dev/"] [""] port}.device") cfg.serialPorts;
+        # Ensure local serial devices are available
+        requires = map (port: "dev-${lib.replaceStrings ["/dev/"] [""] port}.device") serialDevicePaths;
+        after = ["network.target"] ++ map (port: "dev-${lib.replaceStrings ["/dev/"] [""] port}.device") serialDevicePaths;
       };
     };
   };

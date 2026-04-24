@@ -36,6 +36,11 @@ timeout = 2
 # Watchdog: seconds with no data before forcing serial reconnect (0 to disable)
 watchdog_timeout = 900
 
+[tcp_serial]
+# Addresses for serial TCP stream (using socket://host:port)
+enabled = false
+address = [""]
+
 [topics]
 # Topic templates - supported variables: {IATA}, {PUBLIC_KEY}
 status = "meshcore/{IATA}/{PUBLIC_KEY}/status"

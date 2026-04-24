@@ -103,6 +103,12 @@ services.mctomqtt = {
     settings = {
       log-level = "DEBUG";
     };
+
+    # For a TCP serial stream instead of a local device:
+    # tcpSerial = {
+    #   enable = true;
+    #   address = ["socket://192.168.1.123:4403"];
+    # };
   };
 ```
 
@@ -215,6 +221,29 @@ port = 1883
 method = "password"
 username = "my_username"
 password = "my_password"
+```
+
+### Basic TCP Serial Example (00-user.toml)
+
+```toml
+[general]
+iata = "SEA"
+
+[tcp_serial]
+enabled = true
+address = ["socket://192.168.1.123:4403"]
+
+# Example MQTT broker configuration
+[[broker]]
+name = "my-tcp-mqtt"
+enabled = true
+server = "mqtt-tcp.example.com"
+port = 1883
+
+[broker.auth]
+method = "password"
+username = "tcp_username"
+password = "tcp_password"
 ```
 
 ### Advanced Example with Multiple Brokers

@@ -37,7 +37,7 @@ The runtime codebase is a `bridge/` Python package with a thin entry point (proj
 - **`mctomqtt.py`** — Thin entry point (~45 lines). Keeps `__version__`, argparse, logging setup. Creates `MeshCoreBridge(config, debug, version)` and calls `bridge.run()`.
 
 - **`bridge/`** — Python package containing all application logic, split into focused modules:
-  - **`serial_connection.py`** — `SerialConnection` ABC + `RealSerialConnection` (device I/O with internal locking) + `connect()` factory
+  - **`serial_connection.py`** — `SerialConnection` ABC + `RealSerialConnection` (pyserial device/URL I/O with internal locking) + `connect()` factory
   - **`auth_provider.py`** — `AuthProvider` ABC + `MeshCoreAuthProvider` (wraps `auth_token.py`)
   - **`broker_client.py`** — `BrokerClient` ABC + `PahoBrokerClient` (wraps paho-mqtt)
   - **`state.py`** — `BridgeState` shared mutable state container (all ~30 instance variables)
@@ -75,6 +75,8 @@ Configuration uses TOML files with a layered override system. Python 3.11+ `toml
 **Override mechanism:** Drop-in files are deep-merged over the base config. Nested dicts are merged recursively; `[[broker]]` arrays are merged by `name` field.
 
 **Key config sections:** `[general]`, `[serial]`, `[topics]`, `[remote_serial]`, `[update]`, `[[broker]]` with nested `[broker.tls]` and `[broker.auth]`.
+
+**Serial endpoints:** `[serial].ports` uses local device paths by default. To use a TCP serial stream, add a separate `[tcp_serial]` section with `enabled = true` and `address = ["socket://host:port"]`.
 
 **Broker auth methods:** `"password"` (username/password), `"token"` (JWT from device Ed25519 key), or `"none"`.
 

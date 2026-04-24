@@ -58,6 +58,31 @@
         };
       };
 
+      nodes.tcpMachine = {
+        config,
+        pkgs,
+        ...
+      }: {
+        imports = [self.nixosModules.default];
+
+        services.mctomqtt = {
+          enable = true;
+          package = mockMctomqtt;
+          iata = "TCP";
+          defaults.letsmesh-us.enable = false;
+          defaults.letsmesh-eu.enable = false;
+
+          tcpSerial = {
+            enable = true;
+            address = ["socket://192.168.1.123:4403"];
+          };
+
+          settings = {
+            log-level = "INFO";
+          };
+        };
+      };
+
       testScript = ''
         import tomllib
 
@@ -157,6 +182,31 @@
             machine.succeed("systemctl restart mctomqtt.service")
             machine.wait_for_unit("mctomqtt.service")
             machine.succeed("systemctl is-active --quiet mctomqtt.service")
+
+        # Wait for the TCP-configured service to start
+        tcpMachine.wait_for_unit("mctomqtt.service")
+        tcpMachine.succeed("systemctl is-active --quiet mctomqtt.service")
+
+        # Extract config file path from the TCP systemd unit
+        tcp_unit_content = tcpMachine.succeed("systemctl cat mctomqtt.service")
+        tcp_config_path = None
+        for line in tcp_unit_content.splitlines():
+            if "--config" in line:
+                tcp_config_path = line.split("--config")[1].strip().split()[0].rstrip(";")
+                break
+        assert tcp_config_path is not None, "Could not find --config in TCP ExecStart"
+
+        # Read and parse the generated TCP TOML config
+        tcp_config_toml = tcpMachine.succeed(f"cat {tcp_config_path}")
+        tcp_config = tomllib.loads(tcp_config_toml)
+
+        with subtest("TCP serial section"):
+            assert tcp_config["tcp_serial"]["enabled"] is True
+            assert tcp_config["tcp_serial"]["address"] == ["socket://192.168.1.123:4403"]
+
+        with subtest("TCP service does not depend on a local serial device"):
+            tcpMachine.fail("systemctl show mctomqtt.service | grep 'After=' | grep -q 'dev-ttyACM0.device'")
+            tcpMachine.fail("systemctl show mctomqtt.service | grep 'Requires=' | grep -q 'dev-ttyACM0.device'")
 
         print("All tests passed!")
       '';
