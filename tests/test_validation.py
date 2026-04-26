@@ -5,9 +5,13 @@ from __future__ import annotations
 import urllib.error
 from unittest.mock import patch
 
+from pathlib import Path
+
+from installer import InstallerContext
 from installer.config import (
     _lookup_iata_code_with_retry,
     _configure_token_preset_overrides,
+    configure_mqtt_brokers,
     prompt_iata_letsmesh,
     validate_email,
     validate_meshcore_pubkey,
@@ -247,3 +251,125 @@ class TestTokenPresetOwnerPrompt:
         assert 'method = "none"' in content
         assert 'name = "letsmesh-us"' in content
         assert 'owner = "OWNER"' in content
+
+    def test_repeated_calls_do_not_duplicate_remote_serial(self, tmp_path) -> None:
+        """repeated invocations must not create a second [remote_serial] block."""
+        config_d = tmp_path / "config.d"
+        config_d.mkdir()
+        (config_d / "10-letsmesh.toml").write_text(
+            '[[broker]]\nname = "letsmesh-us"\n[broker.auth]\nmethod = "token"\n'
+        )
+        user_toml = config_d / "99-user.toml"
+        user_toml.write_text('[general]\niata = "SEA"\n')
+
+        with (
+            patch("installer.config.prompt_owner_pubkey", return_value="OWNER"),
+            patch("installer.config.prompt_owner_email", return_value="owner@example.com"),
+            patch("installer.config.prompt_yes_no", return_value=True),
+            patch("installer.config.prompt_input", side_effect=["", ""]),
+        ):
+            # First call: user provides no companion keys (empty input ends the loop)
+            _configure_token_preset_overrides(str(tmp_path))
+            # Second call: same again — must not append a duplicate section
+            _configure_token_preset_overrides(str(tmp_path))
+
+        # Must remain valid TOML (a duplicate [remote_serial] would raise here)
+        import tomllib
+        with open(user_toml, "rb") as f:
+            tomllib.load(f)
+        assert user_toml.read_text().count("[remote_serial]") <= 1
+
+    def test_existing_remote_serial_is_preserved_across_calls(self, tmp_path) -> None:
+        """pre-existing companions must be shown and re-used as the prompt default."""
+        config_d = tmp_path / "config.d"
+        config_d.mkdir()
+        (config_d / "10-letsmesh.toml").write_text(
+            '[[broker]]\nname = "letsmesh-us"\n[broker.auth]\nmethod = "token"\n'
+        )
+        user_toml = config_d / "99-user.toml"
+        user_toml.write_text(
+            '[general]\niata = "SEA"\n\n'
+            '[remote_serial]\nenabled = true\nallowed_companions = ["EXISTING"]\n'
+        )
+
+        captured: dict = {}
+
+        def fake_prompt_companions(existing: str = "") -> str:
+            captured["existing"] = existing
+            return existing  # user keeps existing
+
+        with (
+            patch("installer.config.prompt_yes_no", return_value=False),  # decline owner change
+            patch("installer.config.prompt_owner_pubkey", return_value=""),
+            patch("installer.config.prompt_owner_email", return_value=""),
+            patch("installer.config.prompt_allowed_companions", side_effect=fake_prompt_companions),
+        ):
+            _configure_token_preset_overrides(str(tmp_path))
+
+        # The prompt must have been called with the existing CSV
+        assert captured["existing"] == "EXISTING"
+        # And the file must still have exactly one [remote_serial] section
+        import tomllib
+        with open(user_toml, "rb") as f:
+            data = tomllib.load(f)
+        assert data["remote_serial"]["allowed_companions"] == ["EXISTING"]
+        assert user_toml.read_text().count("[remote_serial]") == 1
+
+
+class TestConfigureMqttBrokersIataPrompt:
+    """IATA must be prompted whenever any preset is configured."""
+
+    def _stub_ctx(self, config_dir: Path) -> InstallerContext:
+        return InstallerContext(
+            config_dir=str(config_dir),
+            install_dir=str(config_dir.parent / "opt"),
+            svc_user="",  # skip the chown branch
+        )
+
+    def test_iata_prompted_for_non_token_preset(self, tmp_path: Path) -> None:
+        """Previously the IATA prompt only fired for token-auth presets."""
+        config_dir = tmp_path / "etc" / "mctomqtt"
+        config_d = config_dir / "config.d"
+        config_d.mkdir(parents=True)
+        (config_d / "10-anon.toml").write_text(
+            '[[broker]]\nname = "anon"\nserver = "mqtt.example.com"\n'
+            '[broker.auth]\nmethod = "none"\n'
+        )
+        (config_d / "99-user.toml").write_text('[general]\niata = "XXX"\n')
+
+        ctx = self._stub_ctx(config_dir)
+
+        with (
+            patch("installer.config.prompt_input", return_value="5"),  # finish loop
+            patch("installer.config.prompt_yes_no", return_value=False),
+            patch("installer.config.prompt_iata_letsmesh", return_value="SEA") as mock_iata,
+            patch("installer.config.platform.system", return_value="Darwin"),
+        ):
+            configure_mqtt_brokers(ctx)
+
+        mock_iata.assert_called_once()
+        import tomllib
+        with open(config_d / "99-user.toml", "rb") as f:
+            data = tomllib.load(f)
+        assert data["general"]["iata"] == "SEA"
+
+    def test_no_iata_prompt_when_no_presets(self, tmp_path: Path) -> None:
+        """If the user finishes without adding any preset, don't prompt for IATA."""
+        config_dir = tmp_path / "etc" / "mctomqtt"
+        config_d = config_dir / "config.d"
+        config_d.mkdir(parents=True)
+        (config_d / "99-user.toml").write_text('[general]\niata = "XXX"\n')
+
+        ctx = self._stub_ctx(config_dir)
+
+        with (
+            patch("installer.config.prompt_input", return_value="5"),
+            patch("installer.config.prompt_yes_no", return_value=False),
+            patch("installer.config.prompt_iata_letsmesh") as mock_iata,
+            patch("installer.config.prompt_iata_simple") as mock_iata_simple,
+            patch("installer.config.platform.system", return_value="Darwin"),
+        ):
+            configure_mqtt_brokers(ctx)
+
+        mock_iata.assert_not_called()
+        mock_iata_simple.assert_not_called()

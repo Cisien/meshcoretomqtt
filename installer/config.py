@@ -283,31 +283,25 @@ def _rewrite_token_owner_overrides_toml(
 ) -> None:
     """Replace local auth metadata overrides for the given brokers."""
     path = Path(dest)
-    data: dict[str, Any] = {}
-    if path.exists():
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+    data = _load_user_toml(path)
 
-    brokers = data.get("broker", [])
+    brokers = data.get("broker")
     if not isinstance(brokers, list):
         brokers = []
+        data["broker"] = brokers
 
-    by_name: dict[str, dict[str, Any]] = {}
-    ordered: list[dict[str, Any]] = []
-    for broker in brokers:
-        if not isinstance(broker, dict):
-            continue
-        name = broker.get("name")
-        if isinstance(name, str):
-            by_name[name] = broker
-        ordered.append(broker)
+    by_name: dict[str, dict[str, Any]] = {
+        broker["name"]: broker
+        for broker in brokers
+        if isinstance(broker, dict) and isinstance(broker.get("name"), str)
+    }
 
     for broker_name in broker_names:
         broker = by_name.get(broker_name)
         if broker is None:
             broker = {"name": broker_name}
             by_name[broker_name] = broker
-            ordered.append(broker)
+            brokers.append(broker)
         auth = broker.get("auth")
         if not isinstance(auth, dict):
             auth = {}
@@ -321,8 +315,7 @@ def _rewrite_token_owner_overrides_toml(
         else:
             auth.pop("email", None)
 
-    content = _toml_dumps_user_config(data, ordered)
-    path.write_text(content)
+    _write_user_toml(path, data)
 
 
 def _remove_broker_overrides_toml(dest: str | Path, broker_names: list[str]) -> None:
@@ -331,68 +324,174 @@ def _remove_broker_overrides_toml(dest: str | Path, broker_names: list[str]) -> 
     if not path.exists():
         return
 
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
+    data = _load_user_toml(path)
 
-    brokers = data.get("broker", [])
+    brokers = data.get("broker")
     if not isinstance(brokers, list):
         return
 
     remove_names = set(broker_names)
-    kept = [
+    data["broker"] = [
         broker for broker in brokers
         if not isinstance(broker, dict) or broker.get("name") not in remove_names
     ]
-    content = _toml_dumps_user_config(data, kept)
-    path.write_text(content)
+    _write_user_toml(path, data)
 
 
-def _toml_dumps_user_config(data: dict[str, Any], brokers: list[dict[str, Any]]) -> str:
-    """Serialize installer-managed user config TOML."""
-    lines = [
-        "# MeshCore to MQTT - User Configuration",
-        "# This file contains your local overrides to the defaults in config.toml",
-        "",
-    ]
+USER_CONFIG_HEADER = (
+    "# MeshCore to MQTT - User Configuration\n"
+    "# This file contains your local overrides to the defaults in config.toml\n\n"
+)
 
-    for section in ("general", "serial", "update", "remote_serial"):
-        value = data.get(section)
-        if isinstance(value, dict):
-            lines.append(f"[{section}]")
-            for key, item in value.items():
-                lines.append(f"{key} = {_toml_value(item)}")
-            lines.append("")
 
-    for broker in brokers:
-        name = broker.get("name")
-        if not isinstance(name, str):
-            continue
-        lines.append("[[broker]]")
-        lines.append(f'name = "{toml_escape(name)}"')
-        for key, item in broker.items():
-            if key in ("name", "auth", "tls", "topics") or isinstance(item, dict):
-                continue
-            lines.append(f"{key} = {_toml_value(item)}")
-        for nested in ("tls", "auth", "topics"):
-            nested_data = broker.get(nested)
-            if isinstance(nested_data, dict):
-                lines.append("")
-                lines.append(f"[broker.{nested}]")
-                for key, item in nested_data.items():
-                    lines.append(f"{key} = {_toml_value(item)}")
-        lines.append("")
+def _load_user_toml(path: str | Path) -> dict[str, Any]:
+    """Load a user TOML file, returning an empty dict if it doesn't exist."""
+    p = Path(path)
+    if not p.exists():
+        return {}
+    with open(p, "rb") as f:
+        return tomllib.load(f)
 
-    return "\n".join(lines).rstrip() + "\n"
+
+def _write_user_toml(path: str | Path, data: dict[str, Any]) -> None:
+    """Serialize a user TOML document, prepending the standard header."""
+    Path(path).write_text(USER_CONFIG_HEADER + _toml_dumps(data))
+
+
+_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _toml_key(key: str) -> str:
+    """Render a TOML key, quoting if it can't be a bare key."""
+    if _BARE_KEY_RE.match(key):
+        return key
+    return f'"{toml_escape(key)}"'
 
 
 def _toml_value(value: Any) -> str:
+    """Render a single TOML scalar/array value."""
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int | float):
+    if isinstance(value, int):
         return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return f'"{toml_escape(value)}"'
     if isinstance(value, list):
         return "[" + ", ".join(_toml_value(item) for item in value) + "]"
-    return f'"{toml_escape(str(value))}"'
+    raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
+
+
+def _is_array_of_tables(value: Any) -> bool:
+    return isinstance(value, list) and len(value) > 0 and all(isinstance(item, dict) for item in value)
+
+
+def _split_kinds(data: dict[str, Any]) -> tuple[list[tuple[str, Any]], list[tuple[str, dict]], list[tuple[str, list[dict]]]]:
+    """Split a table's items into (scalars, sub-tables, arrays-of-tables) preserving order."""
+    scalars: list[tuple[str, Any]] = []
+    tables: list[tuple[str, dict]] = []
+    arrays: list[tuple[str, list[dict]]] = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            tables.append((key, value))
+        elif _is_array_of_tables(value):
+            arrays.append((key, value))
+        else:
+            scalars.append((key, value))
+    return scalars, tables, arrays
+
+
+def _emit_table(lines: list[str], prefix: list[str], data: dict[str, Any]) -> None:
+    """Emit a table whose path is `prefix`. Top-level call uses prefix=[]."""
+    scalars, tables, arrays = _split_kinds(data)
+    header = ".".join(_toml_key(seg) for seg in prefix) if prefix else ""
+
+    if scalars:
+        if header:
+            lines.append(f"[{header}]")
+        for key, value in scalars:
+            lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
+        lines.append("")
+    elif header and not tables and not arrays:
+        # Empty leaf table — emit explicit header so it round-trips.
+        lines.append(f"[{header}]")
+        lines.append("")
+
+    for key, table in tables:
+        _emit_table(lines, prefix + [key], table)
+
+    for key, items in arrays:
+        item_header = ".".join(_toml_key(seg) for seg in prefix + [key])
+        for item in items:
+            lines.append(f"[[{item_header}]]")
+            _emit_array_table_body(lines, prefix + [key], item)
+
+
+def _emit_array_table_body(lines: list[str], prefix: list[str], data: dict[str, Any]) -> None:
+    """Emit the body of one array-of-tables element (header already emitted)."""
+    scalars, tables, arrays = _split_kinds(data)
+
+    for key, value in scalars:
+        lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
+    if scalars or (not tables and not arrays):
+        lines.append("")
+
+    for key, table in tables:
+        _emit_table(lines, prefix + [key], table)
+
+    for key, items in arrays:
+        item_header = ".".join(_toml_key(seg) for seg in prefix + [key])
+        for item in items:
+            lines.append(f"[[{item_header}]]")
+            _emit_array_table_body(lines, prefix + [key], item)
+
+
+def _toml_dumps(data: dict[str, Any]) -> str:
+    """Serialize a dict to TOML, preserving all keys and insertion order.
+
+    Comments are not preserved (tomllib drops them on load). Section ordering
+    follows the parsed dict's insertion order, with scalars-before-tables within
+    each table to satisfy TOML's parsing rules.
+    """
+    lines: list[str] = []
+    _emit_table(lines, [], data)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _set_remote_serial(user_toml: str | Path, companions_csv: str) -> None:
+    """Set [remote_serial] enabled/allowed_companions, replacing any existing block."""
+    path = Path(user_toml)
+    data = _load_user_toml(path)
+
+    companions = [k.strip() for k in companions_csv.split(",") if k.strip()]
+    rs = data.get("remote_serial")
+    if not isinstance(rs, dict):
+        rs = {}
+        data["remote_serial"] = rs
+    rs["enabled"] = bool(companions)
+    rs["allowed_companions"] = companions
+
+    _write_user_toml(path, data)
+
+
+def _read_remote_serial_companions(user_toml: str | Path) -> str:
+    """Return CSV of currently-configured remote_serial allowed_companions."""
+    path = Path(user_toml)
+    if not path.exists():
+        return ""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    rs = data.get("remote_serial")
+    if not isinstance(rs, dict):
+        return ""
+    companions = rs.get("allowed_companions", [])
+    if not isinstance(companions, list):
+        return ""
+    return ",".join(str(c) for c in companions if c)
 
 
 # ---------------------------------------------------------------------------
@@ -970,8 +1069,9 @@ def configure_mqtt_brokers(ctx: InstallerContext) -> None:
         if not prompt_yes_no("Add or manage another broker preset or custom broker?", "n"):
             break
 
-    if token_preset_brokers(ctx.config_dir):
+    if configured_presets(ctx.config_dir):
         _configure_iata_for_presets(user_toml, ctx)
+    if token_preset_brokers(ctx.config_dir):
         _configure_token_preset_overrides(ctx.config_dir)
 
     if not added_brokers and not had_existing_brokers:
@@ -1040,11 +1140,15 @@ def _configure_token_preset_overrides(config_dir: str) -> None:
         _rewrite_token_owner_overrides_toml(user_toml, broker_names, owner_pubkey, owner_email)
         print_success(f"Owner info updated for {preset_path.name}")
 
-    allowed_companions = prompt_allowed_companions()
-    if allowed_companions:
-        append_remote_serial_toml(user_toml, allowed_companions)
-        count = len([k for k in allowed_companions.split(",") if k.strip()])
-        print_success(f"Remote serial access enabled with {count} companion(s)")
+    existing_companions = _read_remote_serial_companions(user_toml)
+    new_companions = prompt_allowed_companions(existing_companions)
+    if new_companions != existing_companions:
+        _set_remote_serial(user_toml, new_companions)
+        if new_companions:
+            count = len([k for k in new_companions.split(",") if k.strip()])
+            print_success(f"Remote serial access enabled with {count} companion(s)")
+        else:
+            print_success("Remote serial access disabled")
 
 
 def _shared_metadata_default(metadata: dict[str, tuple[str, str]], idx: int) -> str:
@@ -1221,33 +1325,10 @@ def update_owner_info(config_dir: str) -> None:
     Path(user_toml).write_text(content)
 
     # Prompt for remote serial companions
-    existing_companions = ""
-    comp_match = re.search(r'allowed_companions\s*=\s*\[(.*?)\]', content)
-    if comp_match:
-        raw = comp_match.group(1)
-        existing_companions = ",".join(
-            k.strip().strip('"') for k in raw.split(",") if k.strip().strip('"')
-        )
-
+    existing_companions = _read_remote_serial_companions(user_toml)
     new_companions = prompt_allowed_companions(existing_companions)
-
     if new_companions != existing_companions:
-        companions_array = _companions_to_toml_array(new_companions)
-        new_enabled = "true" if new_companions else "false"
-
-        content = Path(user_toml).read_text()
-        if "[remote_serial]" in content:
-            content = re.sub(
-                r'^(enabled\s*=\s*).*$', f"\\1{new_enabled}",
-                content, count=1, flags=re.MULTILINE,
-            )
-            content = re.sub(
-                r'^(allowed_companions\s*=\s*).*$', f"\\1{companions_array}",
-                content, count=1, flags=re.MULTILINE,
-            )
-            Path(user_toml).write_text(content)
-        else:
-            append_remote_serial_toml(user_toml, new_companions)
+        _set_remote_serial(user_toml, new_companions)
 
     # Summary
     changes = []
