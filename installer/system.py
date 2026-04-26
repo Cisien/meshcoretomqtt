@@ -368,6 +368,12 @@ def prompt_service_user(ctx: InstallerContext) -> str:
 
 def create_system_user(svc_user: str, install_dir: str) -> None:
     """Create a system user for the service (Linux only)."""
+    result = run_cmd(["getent", "group", svc_user], check=False, capture=True)
+    if result.returncode != 0:
+        print_info(f"Creating system group '{svc_user}'...")
+        run_cmd(["groupadd", "--system", svc_user])
+        print_success(f"System group '{svc_user}' created")
+
     # Check if user already exists
     result = run_cmd(["id", svc_user], check=False, capture=True)
     if result.returncode == 0:
@@ -378,6 +384,7 @@ def create_system_user(svc_user: str, install_dir: str) -> None:
             "useradd", "--system", "--no-create-home",
             "--shell", "/usr/sbin/nologin",
             "--home-dir", install_dir,
+            "--gid", svc_user,
             svc_user,
         ])
         print_success(f"System user '{svc_user}' created")

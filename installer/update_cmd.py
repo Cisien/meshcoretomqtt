@@ -85,6 +85,10 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     system_type = detect_system_type(ctx.install_dir)
     print_info(f"Detected installation type: {system_type}")
 
+    if platform.system() != "Darwin" and ctx.svc_user:
+        ctx.svc_user = detect_service_user(ctx)
+        create_system_user(ctx.svc_user, ctx.install_dir)
+
     # ---------------------------------------------------------------------------
     # Install files from repo
     # ---------------------------------------------------------------------------
@@ -190,8 +194,6 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     # Permissions and version info
     # ---------------------------------------------------------------------------
     if platform.system() != "Darwin" and ctx.svc_user:
-        ctx.svc_user = detect_service_user(ctx)
-        create_system_user(ctx.svc_user, ctx.install_dir)
         set_permissions(ctx.install_dir, ctx.config_dir, ctx.svc_user)
 
     create_version_info(ctx)

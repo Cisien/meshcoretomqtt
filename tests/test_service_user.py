@@ -28,6 +28,10 @@ def cleanup_test_user() -> Generator[None, None, None]:
         capture_output=True, check=False,
     )
     subprocess.run(
+        ["groupdel", TEST_USER],
+        capture_output=True, check=False,
+    )
+    subprocess.run(
         ["rm", "-rf", TEST_DIR],
         capture_output=True, check=False,
     )
@@ -40,6 +44,10 @@ class TestCreateSystemUser:
 
         result = subprocess.run(
             ["id", TEST_USER], capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        result = subprocess.run(
+            ["getent", "group", TEST_USER], capture_output=True, text=True,
         )
         assert result.returncode == 0
 
