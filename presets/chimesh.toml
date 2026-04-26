@@ -1,0 +1,19 @@
+# ChicagolandMesh.org broker preset
+
+[[broker]]
+name = "chimesh"
+enabled = true
+server = "mqtt.chimesh.org"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt.chimesh.org"
