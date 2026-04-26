@@ -22,7 +22,7 @@ python3 mctomqtt.py --config config.toml.example --debug    # enables DEBUG-leve
 ```bash
 docker build -t mctomqtt:latest .
 docker run -d --name mctomqtt --device=/dev/ttyACM0 \
-  -v /path/to/config.toml:/etc/mctomqtt/config.toml \
+  -v /path/to/mctomqtt-config:/etc/mctomqtt:ro \
   mctomqtt:latest
 ```
 
@@ -68,7 +68,8 @@ Configuration uses TOML files with a layered override system. Python 3.11+ `toml
 
 **Default config loading** (no `--config` flags):
 1. `/etc/mctomqtt/config.toml` (base defaults, overwritten on updates)
-2. `/etc/mctomqtt/config.d/*.toml` (drop-in overrides, alphabetical order)
+2. `/etc/mctomqtt/config.d/10-*.toml` (broker presets selected during install)
+3. `/etc/mctomqtt/config.d/99-user.toml` (local user overrides, loaded last)
 
 **`--config` override:** When one or more `--config <path>` flags are provided, default config loading is completely bypassed. Only the specified files are loaded, in order, each overlaying the previous. Multiple `--config` flags are supported for layered overrides.
 
@@ -77,6 +78,8 @@ Configuration uses TOML files with a layered override system. Python 3.11+ `toml
 **Key config sections:** `[general]`, `[serial]`, `[topics]`, `[remote_serial]`, `[update]`, `[[broker]]` with nested `[broker.tls]` and `[broker.auth]`.
 
 **Broker auth methods:** `"password"` (username/password), `"token"` (JWT from device Ed25519 key), or `"none"`.
+
+**Broker presets:** Community broker presets live in repo `presets/` as TOML files with `[[broker]]` blocks. The installer copies selected or imported presets to `/etc/mctomqtt/config.d/10-<preset>.toml`.
 
 See `config.toml.example` for the full reference with all options and defaults.
 
@@ -94,7 +97,8 @@ See `config.toml.example` for the full reference with all options and defaults.
 /etc/mctomqtt/              # Config (owned root:mctomqtt, 750)
   config.toml               # Defaults (640, overwritten on updates)
   config.d/
-    00-user.toml            # User config (640, never overwritten)
+    10-*.toml               # Broker presets
+    99-user.toml            # User config (640, never overwritten)
 ```
 
 ## Key Patterns

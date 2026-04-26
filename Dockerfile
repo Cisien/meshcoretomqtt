@@ -29,10 +29,8 @@ RUN apk add --no-cache --virtual .build-deps \
 COPY ./mctomqtt.py ./auth_token.py ./config_loader.py /opt/mctomqtt/
 COPY ./bridge/ /opt/mctomqtt/bridge/
 
-# Note: Mount your config as a volume:
-#   -v /path/to/config.toml:/etc/mctomqtt/config.toml
-# Or mount a drop-in override:
-#   -v /path/to/00-user.toml:/etc/mctomqtt/config.d/00-user.toml
+# Note: Mount your config directory as a volume:
+#   -v /path/to/mctomqtt-config:/etc/mctomqtt:ro
 
 RUN adduser -D mctomqtt
 RUN addgroup mctomqtt dialout

@@ -20,7 +20,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     install_p = sub.add_parser("install", help="Fresh installation")
-    install_p.add_argument("--config", dest="config_url", default="", help="URL to download 00-user.toml from")
+    install_p.add_argument("--config", dest="config_url", default="", help="URL to download 99-user.toml from")
     install_p.add_argument("--update", action="store_true", help="Non-interactive update mode")
 
     sub.add_parser("update", help="Update existing installation")

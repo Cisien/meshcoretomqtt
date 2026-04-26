@@ -421,9 +421,8 @@ def set_permissions(install_dir: str, config_dir: str, svc_user: str) -> None:
     if config_toml.exists():
         os.chmod(str(config_toml), 0o644)
 
-    user_toml = Path(config_dir) / "config.d" / "00-user.toml"
-    if user_toml.exists():
-        os.chmod(str(user_toml), 0o644)
+    for override in config_d.glob("*.toml") if config_d.exists() else []:
+        os.chmod(str(override), 0o644)
 
     print_success(f"Permissions set on {config_dir} (root:{svc_user}, 755/644)")
 
@@ -853,9 +852,11 @@ def install_docker_service(ctx: InstallerContext) -> bool:
     if image is None:
         return False
 
-    # Get serial device from 00-user.toml
+    # Get serial device from the user override file
     serial_device = "/dev/ttyACM0"
-    user_toml = Path(ctx.config_dir) / "config.d" / "00-user.toml"
+    user_toml = Path(ctx.config_dir) / "config.d" / "99-user.toml"
+    if not user_toml.exists():
+        user_toml = Path(ctx.config_dir) / "config.d" / "00-user.toml"
     if user_toml.exists():
         import re
         match = re.search(r'^\s*ports\s*=\s*\["([^"]+)"', user_toml.read_text(), re.MULTILINE)
@@ -865,10 +866,8 @@ def install_docker_service(ctx: InstallerContext) -> bool:
     # Build docker run command
     parts = [
         "docker", "run", "-d", "--name", "mctomqtt", "--restart", "unless-stopped",
-        "-v", f"{ctx.config_dir}/config.toml:/etc/mctomqtt/config.toml:ro",
+        "-v", f"{ctx.config_dir}:/etc/mctomqtt:ro",
     ]
-    if user_toml.exists():
-        parts.extend(["-v", f"{ctx.config_dir}/config.d/00-user.toml:/etc/mctomqtt/config.d/00-user.toml:ro"])
     if Path(serial_device).exists():
         parts.append(f"--device={serial_device}")
     else:

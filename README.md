@@ -169,7 +169,8 @@ Pull requests automatically run the GitHub Actions test workflow on Ubuntu. That
 /etc/mctomqtt/              # Config (owned root:mctomqtt, 755)
   config.toml               # Defaults (644, OVERWRITTEN on updates)
   config.d/                 # Drop-in override directory
-    00-user.toml               # User config (644, never overwritten)
+    10-letsmesh.toml        # Optional broker preset selected during install
+    99-user.toml            # User config (644, never overwritten)
 ```
 
 ## Configuration
@@ -177,9 +178,12 @@ Pull requests automatically run the GitHub Actions test workflow on Ubuntu. That
 Configuration uses TOML files with a layered override system:
 
 - `/etc/mctomqtt/config.toml` — Default values (overwritten on updates, do not edit)
-- `/etc/mctomqtt/config.d/00-user.toml` — Your custom configuration (never overwritten)
+- `/etc/mctomqtt/config.d/10-*.toml` — Broker presets selected during install
+- `/etc/mctomqtt/config.d/99-user.toml` — Your custom configuration (never overwritten)
 
 Files in `config.d/` are loaded alphabetically and deep-merged over the defaults.
+The installer writes presets with a `10-` prefix and user overrides to
+`99-user.toml` so local settings load last.
 
 To bypass the default config loading entirely, use `--config`:
 
@@ -193,10 +197,17 @@ When `--config` is used, `/etc/mctomqtt/` is not read. Multiple `--config` flags
 ### Editing Configuration
 
 ```bash
-sudo nano /etc/mctomqtt/config.d/00-user.toml
+sudo nano /etc/mctomqtt/config.d/99-user.toml
 ```
 
-### Basic Example (00-user.toml)
+### Broker Presets
+
+The installer can copy broker presets from the repo `presets/` directory or
+import a preset from a TOML URL/local path. Selected presets are installed as
+`/etc/mctomqtt/config.d/10-<preset>.toml`; user-specific overrides remain in
+`99-user.toml`.
+
+### Basic Example (99-user.toml)
 
 ```toml
 [general]
@@ -413,7 +424,7 @@ docker build -t mctomqtt:latest /path/to/meshcoretomqtt
 docker run -d \
   --name mctomqtt \
   --restart unless-stopped \
-  -v /path/to/config.toml:/etc/mctomqtt/config.toml \
+  -v /path/to/mctomqtt-config:/etc/mctomqtt:ro \
   --device=/dev/ttyACM0 \
   mctomqtt:latest
 ```
@@ -457,7 +468,7 @@ The updater will:
 - Stop the service/container
 - Download and verify updated files
 - Overwrite `/etc/mctomqtt/config.toml` with latest defaults
-- Preserve your `/etc/mctomqtt/config.d/00-user.toml` configuration
+- Preserve your `/etc/mctomqtt/config.d/99-user.toml` configuration
 - Restart the service/container automatically
 
 ## Migration
@@ -483,7 +494,7 @@ curl -fsSL https://raw.githubusercontent.com/Cisien/meshcoretomqtt/main/uninstal
 The uninstaller will:
 
 - Stop and remove the service
-- Offer to backup your `00-user.toml` configuration
+- Offer to backup your `99-user.toml` configuration
 - Remove `/opt/mctomqtt/` and `/etc/mctomqtt/`
 - Remove the `mctomqtt` system user
 

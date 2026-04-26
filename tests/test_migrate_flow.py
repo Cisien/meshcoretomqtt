@@ -73,7 +73,7 @@ class TestMigrateFlow:
         # Write to new location
         config_dir = tmp_path / "etc" / "mctomqtt" / "config.d"
         config_dir.mkdir(parents=True)
-        user_toml = config_dir / "00-user.toml"
+        user_toml = config_dir / "99-user.toml"
         user_toml.write_text(
             "# MeshCore to MQTT - User Configuration\n"
             "# Migrated from legacy .env/.env.local installation\n\n"

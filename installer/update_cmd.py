@@ -6,13 +6,18 @@ import os
 import platform
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import extract_version_from_file
-from .config import configure_mqtt_brokers, update_owner_info
+from .config import (
+    configure_mqtt_brokers,
+    update_owner_info,
+    migrate_user_config_filename,
+    token_preset_brokers,
+    user_config_path,
+)
 from .system import (
     LOCAL_IMAGE,
     check_service_health,
@@ -22,9 +27,7 @@ from .system import (
     create_venv,
     detect_service_user,
     detect_system_type,
-    docker_cmd,
     download_repo_archive,
-    install_launchd_service,
     install_systemd_service,
     pull_or_build_docker_image,
     run_cmd,
@@ -35,7 +38,6 @@ from .ui import (
     print_header,
     print_info,
     print_success,
-    print_warning,
     prompt_yes_no,
 )
 
@@ -135,7 +137,7 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     os.chmod(f"{ctx.install_dir}/mctomqtt.py", 0o755)
     os.chmod(f"{ctx.install_dir}/uninstall.sh", 0o755)
 
-    # Update base config (overwrite config.toml, preserve 00-user.toml)
+    # Update base config (overwrite config.toml, preserve user overrides)
     shutil.copy2(os.path.join(tmp_dir, "config.toml.example"), f"{ctx.config_dir}/config.toml")
     print_success(f"Base config updated at {ctx.config_dir}/config.toml")
     print_success(f"Files updated in {ctx.install_dir}")
@@ -153,7 +155,7 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
     # ---------------------------------------------------------------------------
     print_header("Configuration")
 
-    user_toml = Path(ctx.config_dir) / "config.d" / "00-user.toml"
+    user_toml = migrate_user_config_filename(ctx.config_dir)
     if user_toml.exists():
         if ctx.update_mode:
             print_info("Keeping existing configuration")
@@ -161,14 +163,14 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             shutil.copy2(str(user_toml), f"{user_toml}.backup-{timestamp}")
-            user_toml.unlink(missing_ok=True)
+            print_info(f"Backed up existing configuration to {user_toml}.backup-{timestamp}")
             configure_mqtt_brokers(ctx)
         else:
             print_info("Keeping existing configuration")
 
             # Offer owner info update for token-auth brokers
             content = user_toml.read_text()
-            if 'method = "token"' in content:
+            if 'method = "token"' in content or token_preset_brokers(ctx.config_dir):
                 print()
                 print_info("Token-authenticated brokers detected")
 
@@ -232,10 +234,8 @@ def _do_update(ctx: InstallerContext, tmp_dir: str) -> None:
 
                     parts: list[str] = [
                         "docker", "run", "-d", "--name", "mctomqtt", "--restart", "unless-stopped",
-                        "-v", f"{ctx.config_dir}/config.toml:/etc/mctomqtt/config.toml:ro",
+                        "-v", f"{ctx.config_dir}:/etc/mctomqtt:ro",
                     ]
-                    if user_toml.exists():
-                        parts.extend(["-v", f"{ctx.config_dir}/config.d/00-user.toml:/etc/mctomqtt/config.d/00-user.toml:ro"])
                     if Path(serial_device).exists():
                         parts.append(f"--device={serial_device}")
                     parts.append(image)
@@ -278,7 +278,7 @@ def _print_update_summary(ctx: InstallerContext, system_type: str) -> None:
     print(f"Configuration directory: {ctx.config_dir}")
     print()
     print(f"Base config: {ctx.config_dir}/config.toml")
-    print(f"User config: {ctx.config_dir}/config.d/00-user.toml")
+    print(f"User config: {user_config_path(ctx.config_dir)}")
     print()
 
     if system_type == "docker":

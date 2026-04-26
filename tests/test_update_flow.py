@@ -19,22 +19,22 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 class TestUpdateFlow:
     def test_update_preserves_user_toml(self, tmp_path: Path) -> None:
-        """Verify that 00-user.toml is preserved after update."""
+        """Verify that 99-user.toml is preserved after update."""
         config_dir = tmp_path / "etc" / "mctomqtt"
         config_d = config_dir / "config.d"
         config_d.mkdir(parents=True)
 
-        # Create a 00-user.toml that should be preserved
+        # Create a 99-user.toml that should be preserved
         user_toml_content = '[general]\niata = "SEA"\n\n[serial]\nports = ["/dev/ttyACM0"]\n'
-        (config_d / "00-user.toml").write_text(user_toml_content)
+        (config_d / "99-user.toml").write_text(user_toml_content)
         (config_dir / "config.toml").write_text("[general]\niata = \"XXX\"\n")
 
-        # Simulate an update by verifying the 00-user.toml is intact
-        content = (config_d / "00-user.toml").read_text()
+        # Simulate an update by verifying the 99-user.toml is intact
+        content = (config_d / "99-user.toml").read_text()
         assert content == user_toml_content
 
         # Verify it's valid TOML
-        with open(config_d / "00-user.toml", "rb") as f:
+        with open(config_d / "99-user.toml", "rb") as f:
             data = tomllib.load(f)
         assert data["general"]["iata"] == "SEA"
         assert data["serial"]["ports"] == ["/dev/ttyACM0"]

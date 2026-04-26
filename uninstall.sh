@@ -202,14 +202,17 @@ remove_service_user() {
 # Remove configuration files
 remove_config() {
     local config_dir="$DEFAULT_CONFIG_DIR"
-    local user_toml="$config_dir/config.d/00-user.toml"
+    local user_toml="$config_dir/config.d/99-user.toml"
+    if [ ! -f "$user_toml" ] && [ -f "$config_dir/config.d/00-user.toml" ]; then
+        user_toml="$config_dir/config.d/00-user.toml"
+    fi
 
     if [ ! -d "$config_dir" ]; then
         print_info "No configuration directory found at $config_dir"
         return
     fi
 
-    # Offer to back up 00-user.toml before removal
+    # Offer to back up the user TOML before removal
     if [ -f "$user_toml" ]; then
         echo "Your user configuration file:"
         echo ""
@@ -219,7 +222,7 @@ remove_config() {
         fi
         echo ""
 
-        if prompt_yes_no "Do you want to back up 00-user.toml before uninstalling?" "y"; then
+        if prompt_yes_no "Do you want to back up $(basename "$user_toml") before uninstalling?" "y"; then
             BACKUP_FILE="$HOME/mctomqtt-user-toml-backup-$(date +%Y%m%d-%H%M%S).toml"
             sudo cp "$user_toml" "$BACKUP_FILE"
             sudo chown "$(whoami)" "$BACKUP_FILE"

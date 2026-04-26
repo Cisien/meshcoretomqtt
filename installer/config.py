@@ -5,8 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import tempfile
+import tomllib
+import time
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -24,6 +29,37 @@ if TYPE_CHECKING:
     from . import InstallerContext
 
 IATA_API_BASE = "https://api.letsmesh.net/api/iata"
+USER_CONFIG_FILENAME = "99-user.toml"
+LEGACY_USER_CONFIG_FILENAME = "00-user.toml"
+PRESET_PREFIX = "10-"
+
+
+def user_config_path(config_dir: str | Path) -> Path:
+    """Return the canonical user override path."""
+    return Path(config_dir) / "config.d" / USER_CONFIG_FILENAME
+
+
+def legacy_user_config_path(config_dir: str | Path) -> Path:
+    """Return the legacy user override path."""
+    return Path(config_dir) / "config.d" / LEGACY_USER_CONFIG_FILENAME
+
+
+def migrate_user_config_filename(config_dir: str | Path) -> Path:
+    """Rename legacy 00-user.toml to 99-user.toml so user overrides load last."""
+    new_path = user_config_path(config_dir)
+    old_path = legacy_user_config_path(config_dir)
+
+    if old_path.exists() and new_path.exists():
+        print_error(
+            f"Both {old_path} and {new_path} exist. Remove or merge one before continuing."
+        )
+        raise SystemExit(1)
+
+    if old_path.exists():
+        old_path.rename(new_path)
+        print_success(f"Migrated user config to {new_path}")
+
+    return new_path
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +120,7 @@ def _companions_to_toml_array(csv: str) -> str:
 # ---------------------------------------------------------------------------
 
 def write_user_toml_base(dest: str, iata: str, serial_device: str, repo: str, branch: str) -> None:
-    """Write the initial 00-user.toml with general settings and serial config."""
+    """Write the initial user TOML with general settings and serial config."""
     content = f"""# MeshCore to MQTT - User Configuration
 # This file contains your local overrides to the defaults in config.toml
 
@@ -120,7 +156,7 @@ def append_letsmesh_broker_toml(
     owner: str,
     email: str,
 ) -> None:
-    """Append a LetsMesh broker block to 00-user.toml."""
+    """Append a LetsMesh broker block to a TOML file."""
     block = f"""
 [[broker]]
 name = "{toml_escape(broker_name)}"
@@ -161,7 +197,7 @@ def append_custom_broker_toml(
     owner: str = "",
     email: str = "",
 ) -> None:
-    """Append a custom broker block to 00-user.toml."""
+    """Append a custom broker block to a TOML file."""
     lines = [
         "",
         "[[broker]]",
@@ -197,7 +233,7 @@ def append_custom_broker_toml(
 
 
 def append_remote_serial_toml(dest: str, companions_csv: str) -> None:
-    """Append remote serial config to 00-user.toml."""
+    """Append remote serial config to a TOML file."""
     companions_array = _companions_to_toml_array(companions_csv)
     enabled = "true" if companions_csv else "false"
 
@@ -208,6 +244,332 @@ allowed_companions = {companions_array}
 """
     with open(dest, "a") as f:
         f.write(block)
+
+
+def append_token_owner_overrides_toml(
+    dest: str,
+    broker_names: list[str],
+    owner: str,
+    email: str,
+) -> None:
+    """Append local auth metadata overrides for token-auth preset brokers."""
+    if not owner and not email:
+        return
+
+    lines: list[str] = []
+    for broker_name in broker_names:
+        lines.extend([
+            "",
+            "[[broker]]",
+            f'name = "{toml_escape(broker_name)}"',
+            "",
+            "[broker.auth]",
+        ])
+        if owner:
+            lines.append(f'owner = "{toml_escape(owner)}"')
+        if email:
+            lines.append(f'email = "{toml_escape(email)}"')
+
+    lines.append("")
+    with open(dest, "a") as f:
+        f.write("\n".join(lines))
+
+
+def _rewrite_token_owner_overrides_toml(
+    dest: str,
+    broker_names: list[str],
+    owner: str,
+    email: str,
+) -> None:
+    """Replace local auth metadata overrides for the given brokers."""
+    path = Path(dest)
+    data: dict[str, Any] = {}
+    if path.exists():
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+
+    brokers = data.get("broker", [])
+    if not isinstance(brokers, list):
+        brokers = []
+
+    by_name: dict[str, dict[str, Any]] = {}
+    ordered: list[dict[str, Any]] = []
+    for broker in brokers:
+        if not isinstance(broker, dict):
+            continue
+        name = broker.get("name")
+        if isinstance(name, str):
+            by_name[name] = broker
+        ordered.append(broker)
+
+    for broker_name in broker_names:
+        broker = by_name.get(broker_name)
+        if broker is None:
+            broker = {"name": broker_name}
+            by_name[broker_name] = broker
+            ordered.append(broker)
+        auth = broker.get("auth")
+        if not isinstance(auth, dict):
+            auth = {}
+            broker["auth"] = auth
+        if owner:
+            auth["owner"] = owner
+        else:
+            auth.pop("owner", None)
+        if email:
+            auth["email"] = email
+        else:
+            auth.pop("email", None)
+
+    content = _toml_dumps_user_config(data, ordered)
+    path.write_text(content)
+
+
+def _remove_broker_overrides_toml(dest: str | Path, broker_names: list[str]) -> None:
+    """Remove local broker override blocks for the given broker names."""
+    path = Path(dest)
+    if not path.exists():
+        return
+
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+
+    brokers = data.get("broker", [])
+    if not isinstance(brokers, list):
+        return
+
+    remove_names = set(broker_names)
+    kept = [
+        broker for broker in brokers
+        if not isinstance(broker, dict) or broker.get("name") not in remove_names
+    ]
+    content = _toml_dumps_user_config(data, kept)
+    path.write_text(content)
+
+
+def _toml_dumps_user_config(data: dict[str, Any], brokers: list[dict[str, Any]]) -> str:
+    """Serialize installer-managed user config TOML."""
+    lines = [
+        "# MeshCore to MQTT - User Configuration",
+        "# This file contains your local overrides to the defaults in config.toml",
+        "",
+    ]
+
+    for section in ("general", "serial", "update", "remote_serial"):
+        value = data.get(section)
+        if isinstance(value, dict):
+            lines.append(f"[{section}]")
+            for key, item in value.items():
+                lines.append(f"{key} = {_toml_value(item)}")
+            lines.append("")
+
+    for broker in brokers:
+        name = broker.get("name")
+        if not isinstance(name, str):
+            continue
+        lines.append("[[broker]]")
+        lines.append(f'name = "{toml_escape(name)}"')
+        for key, item in broker.items():
+            if key in ("name", "auth", "tls", "topics") or isinstance(item, dict):
+                continue
+            lines.append(f"{key} = {_toml_value(item)}")
+        for nested in ("tls", "auth", "topics"):
+            nested_data = broker.get(nested)
+            if isinstance(nested_data, dict):
+                lines.append("")
+                lines.append(f"[broker.{nested}]")
+                for key, item in nested_data.items():
+                    lines.append(f"{key} = {_toml_value(item)}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    return f'"{toml_escape(str(value))}"'
+
+
+# ---------------------------------------------------------------------------
+# Preset helpers
+# ---------------------------------------------------------------------------
+
+def _safe_preset_basename(name: str) -> str:
+    """Validate and return a safe TOML preset basename."""
+    basename = Path(name).name
+    if basename != name or not basename or basename in (".", ".."):
+        raise ValueError("Preset filename must be a simple basename")
+    if "/" in basename or "\\" in basename:
+        raise ValueError("Preset filename must not contain path separators")
+    if not basename.endswith(".toml"):
+        raise ValueError("Preset filename must end with .toml")
+    if basename.startswith("."):
+        raise ValueError("Preset filename must not be hidden")
+    return basename
+
+
+def preset_dest_path(config_dir: str | Path, original_filename: str) -> Path:
+    """Return the active config.d path for a preset filename."""
+    basename = _safe_preset_basename(original_filename)
+    if basename.startswith(PRESET_PREFIX):
+        dest_name = basename
+    else:
+        dest_name = f"{PRESET_PREFIX}{basename}"
+    return Path(config_dir) / "config.d" / dest_name
+
+
+def validate_preset_toml(path: str | Path) -> dict[str, Any]:
+    """Load and validate a broker preset TOML file."""
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+
+    brokers = data.get("broker")
+    if not isinstance(brokers, list) or not brokers:
+        raise ValueError("Preset must contain at least one [[broker]] block")
+
+    for broker in brokers:
+        if not isinstance(broker, dict) or not broker.get("name"):
+            raise ValueError("Every preset broker must have a name")
+
+    return data
+
+
+def list_bundled_presets(repo_dir: str | Path) -> list[Path]:
+    """List bundled preset TOML files from the checked-out or downloaded repo."""
+    preset_dir = Path(repo_dir) / "presets"
+    if not preset_dir.is_dir():
+        return []
+    return sorted(p for p in preset_dir.glob("*.toml") if p.is_file())
+
+
+def copy_preset_to_config(source: str | Path, config_dir: str | Path) -> Path:
+    """Validate and copy a preset into config.d with the preset prefix."""
+    source_path = Path(source)
+    dest = preset_dest_path(config_dir, source_path.name)
+    validate_preset_toml(source_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, dest)
+    return dest
+
+
+def _filename_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    return Path(parsed.path).name
+
+
+def import_preset_to_config(source: str, config_dir: str | Path) -> Path:
+    """Import a preset from a local path or URL into config.d."""
+    if re.match(r"^https?://", source):
+        filename = _safe_preset_basename(_filename_from_url(source))
+        dest = preset_dest_path(config_dir, filename)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            req = urllib.request.Request(
+                source,
+                headers={"User-Agent": "meshcoretomqtt-installer"},
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                tmp_path.write_bytes(resp.read())
+            validate_preset_toml(tmp_path)
+            shutil.copy2(tmp_path, dest)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        return dest
+
+    source_path = Path(source).expanduser()
+    _safe_preset_basename(source_path.name)
+    return copy_preset_to_config(source_path, config_dir)
+
+
+def token_broker_names_from_preset(path: str | Path) -> list[tuple[str, str]]:
+    """Return (preset filename, broker name) entries for token-auth brokers."""
+    data = validate_preset_toml(path)
+    names: list[tuple[str, str]] = []
+    for broker in data.get("broker", []):
+        auth = broker.get("auth", {})
+        if isinstance(auth, dict) and auth.get("method") == "token":
+            names.append((Path(path).name, str(broker["name"])))
+    return names
+
+
+def token_preset_brokers(config_dir: str | Path) -> dict[Path, list[str]]:
+    """Return token-auth broker names grouped by active preset file."""
+    config_d = Path(config_dir) / "config.d"
+    result: dict[Path, list[str]] = {}
+    if not config_d.is_dir():
+        return result
+
+    for preset in sorted(config_d.glob(f"{PRESET_PREFIX}*.toml")):
+        try:
+            broker_names = [name for _preset, name in token_broker_names_from_preset(preset)]
+        except (OSError, ValueError, tomllib.TOMLDecodeError):
+            continue
+        if broker_names:
+            result[preset] = broker_names
+    return result
+
+
+def configured_presets(config_dir: str | Path) -> dict[Path, list[str]]:
+    """Return active preset files and their broker names."""
+    config_d = Path(config_dir) / "config.d"
+    result: dict[Path, list[str]] = {}
+    if not config_d.is_dir():
+        return result
+
+    for preset in sorted(config_d.glob(f"{PRESET_PREFIX}*.toml")):
+        try:
+            data = validate_preset_toml(preset)
+        except (OSError, ValueError, tomllib.TOMLDecodeError):
+            result[preset] = []
+            continue
+        brokers = data.get("broker", [])
+        names = [
+            str(broker["name"]) for broker in brokers
+            if isinstance(broker, dict) and broker.get("name")
+        ]
+        result[preset] = names
+    return result
+
+
+def _broker_auth_metadata(config_dir: str | Path, broker_name: str) -> tuple[str, str]:
+    """Return effective owner/email for a broker from config.d load order."""
+    owner = ""
+    email = ""
+    config_d = Path(config_dir) / "config.d"
+    if not config_d.is_dir():
+        return owner, email
+
+    for path in sorted(config_d.glob("*.toml")):
+        try:
+            data = validate_preset_toml(path) if path.name.startswith(PRESET_PREFIX) else _load_toml_file(path)
+        except (OSError, ValueError, tomllib.TOMLDecodeError):
+            continue
+        brokers = data.get("broker", [])
+        if not isinstance(brokers, list):
+            continue
+        for broker in brokers:
+            if not isinstance(broker, dict) or broker.get("name") != broker_name:
+                continue
+            auth = broker.get("auth", {})
+            if not isinstance(auth, dict):
+                continue
+            if "owner" in auth:
+                owner = str(auth.get("owner") or "")
+            if "email" in auth:
+                email = str(auth.get("email") or "")
+    return owner, email
+
+
+def _load_toml_file(path: str | Path) -> dict[str, Any]:
+    with open(path, "rb") as f:
+        return tomllib.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -235,14 +597,30 @@ def search_iata_api(query: str, script_version: str = "unknown") -> list[tuple[s
         return []
 
 
+def _lookup_iata_code_with_retry(
+    code: str,
+    script_version: str = "unknown",
+    attempts: int = 3,
+) -> tuple[str | None, bool]:
+    """Look up an IATA code. Returns (airport name, validation_unavailable)."""
+    url = _iata_api_url(f"code={urllib.request.quote(code)}", script_version)
+    for attempt in range(1, attempts + 1):
+        try:
+            data = json.loads(_iata_request(url))
+            if not isinstance(data, dict):
+                return None, False
+            return data.get("name"), False
+        except (urllib.error.URLError, json.JSONDecodeError, KeyError, OSError):
+            if attempt == attempts:
+                return None, True
+            time.sleep(1)
+    return None, True
+
+
 def lookup_iata_code(code: str, script_version: str = "unknown") -> str | None:
     """Look up a specific IATA code. Returns airport name or None."""
-    url = _iata_api_url(f"code={urllib.request.quote(code)}", script_version)
-    try:
-        data = json.loads(_iata_request(url))
-        return data.get("name")
-    except (urllib.error.URLError, json.JSONDecodeError, KeyError, OSError):
-        return None
+    name, _validation_unavailable = _lookup_iata_code_with_retry(code, script_version)
+    return name
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +670,7 @@ def prompt_iata_letsmesh(existing: str = "", script_version: str = "unknown") ->
         # If exactly 3 uppercase letters, try direct lookup
         if re.fullmatch(r"[A-Z]{3}", upper_query):
             print_info(f"Looking up {upper_query}...")
-            name = lookup_iata_code(upper_query, script_version)
+            name, validation_unavailable = _lookup_iata_code_with_retry(upper_query, script_version)
             if name:
                 print()
                 print_success(f"Found: {upper_query} - {name}")
@@ -303,8 +681,20 @@ def prompt_iata_letsmesh(existing: str = "", script_version: str = "unknown") ->
                     return upper_query
                 print()
                 continue
+            if validation_unavailable:
+                print_warning(f"Could not validate IATA code '{upper_query}' after retrying")
+                if prompt_yes_no(f"Use '{upper_query}' without validation?", "y"):
+                    print()
+                    print_success(f"Selected: {upper_query}")
+                    return upper_query
+                print()
+                continue
             else:
-                print_error(f"IATA code '{upper_query}' not found in database")
+                print_warning(f"IATA code '{upper_query}' was not found in the LetsMesh database")
+                if prompt_yes_no(f"Use '{upper_query}' anyway?", "y"):
+                    print()
+                    print_success(f"Selected: {upper_query}")
+                    return upper_query
                 print()
                 continue
 
@@ -448,7 +838,7 @@ def prompt_allowed_companions(existing: str = "") -> str:
 
 def configure_custom_broker(broker_num: int, config_dir: str) -> None:
     """Configure a single custom MQTT broker interactively."""
-    user_toml = f"{config_dir}/config.d/00-user.toml"
+    user_toml = str(migrate_user_config_filename(config_dir))
 
     print()
     print_header(f"Configuring MQTT Broker {broker_num}")
@@ -515,79 +905,77 @@ def configure_custom_broker(broker_num: int, config_dir: str) -> None:
 
 def configure_mqtt_brokers(ctx: InstallerContext) -> None:
     """Interactive MQTT broker configuration flow."""
-    user_toml = f"{ctx.config_dir}/config.d/00-user.toml"
+    user_toml_path = migrate_user_config_filename(ctx.config_dir)
+    user_toml = str(user_toml_path)
 
-    # Ensure 00-user.toml exists with base settings
+    # Ensure 99-user.toml exists with base settings
     if not Path(user_toml).exists():
         from .system import select_serial_device
         serial_device = select_serial_device()
         write_user_toml_base(user_toml, "XXX", serial_device, ctx.repo, ctx.branch)
 
-    print()
-    print_header("MQTT Broker Configuration")
-    print()
-    print_info("Enable the LetsMesh.net Packet Analyzer MQTT servers?")
-    print("  - Real-time packet analysis and visualization")
-    print("  - Network health monitoring")
-    print("  - Includes US and EU regional brokers for redundancy")
-    print()
+    added_brokers = False
+    had_existing_brokers = _config_dir_has_broker(ctx.config_dir)
 
-    if prompt_yes_no("Enable LetsMesh Packet Analyzer MQTT servers?", "y"):
-        # LetsMesh IATA selection via API (no jq needed!)
-        existing_iata = _read_existing_iata(user_toml)
-        if not existing_iata or existing_iata == "XXX":
-            iata = prompt_iata_letsmesh("", ctx.script_version)
-            _update_iata_in_file(user_toml, iata)
-            print_success(f"IATA code set to: {iata}")
-
-        # Prompt for owner info
+    while True:
         print()
-        print_info("LetsMesh Packet Analyzer supports optional owner identification")
-        print_info("This links your observer to your MeshCore public key and email")
-        owner_pubkey = prompt_owner_pubkey()
-        owner_email = prompt_owner_email()
-        allowed_companions = prompt_allowed_companions()
+        print_header("MQTT Broker Configuration")
+        print()
+        _print_configured_presets(ctx.config_dir)
+        print_info("Choose how to configure MQTT brokers:")
+        print("  1) Select bundled broker presets")
+        print("  2) Import a preset from a URL or local path")
+        print("  3) Configure a custom MQTT broker")
+        print("  4) Manage existing presets")
+        print("  5) Finish without adding or changing brokers")
+        print()
 
-        # Configure US and EU brokers
-        append_letsmesh_broker_toml(
-            user_toml, "letsmesh-us",
-            "mqtt-us-v1.letsmesh.net", "mqtt-us-v1.letsmesh.net",
-            owner_pubkey, owner_email,
-        )
-        append_letsmesh_broker_toml(
-            user_toml, "letsmesh-eu",
-            "mqtt-eu-v1.letsmesh.net", "mqtt-eu-v1.letsmesh.net",
-            owner_pubkey, owner_email,
-        )
+        choice = prompt_input("Choose broker setup option [1-5]", "1")
 
-        if allowed_companions:
-            append_remote_serial_toml(user_toml, allowed_companions)
-            count = len([k for k in allowed_companions.split(",") if k.strip()])
-            print_success(f"Remote serial access enabled with {count} companion(s)")
-
-        # Build success message
-        owner_info = ""
-        if owner_pubkey and owner_email:
-            owner_info = f" with owner: {owner_pubkey} ({owner_email})"
-        elif owner_pubkey:
-            owner_info = f" with owner: {owner_pubkey}"
-        elif owner_email:
-            owner_info = f" with email: {owner_email}"
-        print_success(f"LetsMesh Packet Analyzer MQTT servers enabled{owner_info}")
-
-        if prompt_yes_no("Would you like to configure additional MQTT brokers?", "n"):
-            _configure_additional_brokers(ctx)
-    else:
-        # User declined LetsMesh — disable both default brokers
-        append_disabled_broker_toml(user_toml, "letsmesh-us")
-        append_disabled_broker_toml(user_toml, "letsmesh-eu")
-        if prompt_yes_no("Would you like to configure a custom MQTT broker?", "y"):
+        if choice == "1":
+            selected = _select_bundled_presets(ctx)
+            if selected:
+                for preset in selected:
+                    try:
+                        copied = copy_preset_to_config(preset, ctx.config_dir)
+                        print_success(f"Preset installed: {copied.name}")
+                        added_brokers = True
+                    except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
+                        print_error(f"Failed to install preset {preset.name}: {exc}")
+            else:
+                print_warning("No bundled presets selected")
+        elif choice == "2":
+            source = prompt_input("Preset URL or local path")
+            if not source:
+                print_warning("No preset source provided")
+            else:
+                try:
+                    copied = import_preset_to_config(source, ctx.config_dir)
+                    print_success(f"Preset installed: {copied.name}")
+                    added_brokers = True
+                except (OSError, ValueError, tomllib.TOMLDecodeError, urllib.error.URLError) as exc:
+                    print_error(f"Failed to import preset: {exc}")
+        elif choice == "3":
             _configure_iata_simple(user_toml)
-            configure_custom_broker(1, ctx.config_dir)
-            if prompt_yes_no("Would you like to configure additional MQTT brokers?", "n"):
-                _configure_additional_brokers(ctx)
+            configure_custom_broker(_next_custom_broker_number(ctx.config_dir), ctx.config_dir)
+            added_brokers = True
+        elif choice == "4":
+            _manage_existing_presets(ctx.config_dir)
+        elif choice == "5":
+            break
         else:
-            print_warning(f"No MQTT brokers configured - you'll need to edit {user_toml} manually")
+            print_error("Invalid selection")
+            continue
+
+        if not prompt_yes_no("Add or manage another broker preset or custom broker?", "n"):
+            break
+
+    if token_preset_brokers(ctx.config_dir):
+        _configure_iata_for_presets(user_toml, ctx)
+        _configure_token_preset_overrides(ctx.config_dir)
+
+    if not added_brokers and not had_existing_brokers:
+        print_warning(f"No MQTT brokers configured - you'll need to edit {user_toml} manually")
 
     # Fix ownership after writing config
     if platform.system() != "Darwin" and ctx.svc_user:
@@ -597,7 +985,7 @@ def configure_mqtt_brokers(ctx: InstallerContext) -> None:
 
 
 def _configure_iata_simple(user_toml: str) -> None:
-    """Prompt for simple IATA and update 00-user.toml."""
+    """Prompt for simple IATA and update the user TOML."""
     existing_iata = _read_existing_iata(user_toml)
     if not existing_iata or existing_iata == "XXX":
         iata = prompt_iata_simple()
@@ -605,24 +993,171 @@ def _configure_iata_simple(user_toml: str) -> None:
         print_success(f"IATA code set to: {iata}")
 
 
-def _configure_additional_brokers(ctx: InstallerContext) -> None:
-    """Configure additional custom brokers."""
-    user_toml = f"{ctx.config_dir}/config.d/00-user.toml"
-    # Count existing broker blocks
+def _configure_iata_for_presets(user_toml: str, ctx: InstallerContext) -> None:
+    """Prompt for IATA for preset brokers if the user config still needs it."""
+    existing_iata = _read_existing_iata(user_toml)
+    if not existing_iata or existing_iata == "XXX":
+        iata = prompt_iata_letsmesh("", ctx.script_version)
+        _update_iata_in_file(user_toml, iata)
+        print_success(f"IATA code set to: {iata}")
+
+
+def _configure_token_preset_overrides(config_dir: str) -> None:
+    """Configure owner/email overrides separately for each token-auth preset."""
+    user_toml = str(user_config_path(config_dir))
+    presets = token_preset_brokers(config_dir)
+    if not presets:
+        return
+
+    print()
+    print_info("Token-authenticated broker presets support optional owner identification")
+    print_info("This links your observer to your MeshCore public key and email")
+
+    for preset_path, broker_names in presets.items():
+        print()
+        print_header(f"Owner Info: {preset_path.name}")
+        print_info("Token-authenticated brokers in this preset:")
+
+        metadata = {
+            broker_name: _broker_auth_metadata(config_dir, broker_name)
+            for broker_name in broker_names
+        }
+        has_owner_info = any(owner or email for owner, email in metadata.values())
+
+        for broker_name in broker_names:
+            owner, email = metadata[broker_name]
+            print(f"  - {broker_name}")
+            print(f"    owner: {owner or '(not set)'}")
+            print(f"    email: {email or '(not set)'}")
+
+        if has_owner_info and not prompt_yes_no(f"Change owner info for {preset_path.name}?", "n"):
+            continue
+
+        owner_default = _shared_metadata_default(metadata, 0)
+        email_default = _shared_metadata_default(metadata, 1)
+        owner_pubkey = prompt_owner_pubkey(owner_default)
+        owner_email = prompt_owner_email(email_default)
+        _rewrite_token_owner_overrides_toml(user_toml, broker_names, owner_pubkey, owner_email)
+        print_success(f"Owner info updated for {preset_path.name}")
+
+    allowed_companions = prompt_allowed_companions()
+    if allowed_companions:
+        append_remote_serial_toml(user_toml, allowed_companions)
+        count = len([k for k in allowed_companions.split(",") if k.strip()])
+        print_success(f"Remote serial access enabled with {count} companion(s)")
+
+
+def _shared_metadata_default(metadata: dict[str, tuple[str, str]], idx: int) -> str:
+    """Return the shared existing owner/email value if all brokers agree."""
+    values = {pair[idx] for pair in metadata.values() if pair[idx]}
+    return values.pop() if len(values) == 1 else ""
+
+
+def _print_configured_presets(config_dir: str) -> None:
+    """Print a summary of active preset files."""
+    presets = configured_presets(config_dir)
+    if not presets:
+        print_info("Configured broker presets: none")
+        print()
+        return
+
+    print_info("Configured broker presets:")
+    for preset, broker_names in presets.items():
+        brokers = ", ".join(broker_names) if broker_names else "no valid broker blocks"
+        print(f"  - {preset.name}: {brokers}")
+    print()
+
+
+def _manage_existing_presets(config_dir: str) -> None:
+    """Delete configured preset files and matching user overrides."""
+    presets = configured_presets(config_dir)
+    if not presets:
+        print_warning("No configured presets found")
+        return
+
+    print()
+    print_info("Configured broker presets:")
+    preset_items = list(presets.items())
+    for idx, (preset, broker_names) in enumerate(preset_items, 1):
+        brokers = ", ".join(broker_names) if broker_names else "no valid broker blocks"
+        print(f"  {idx}) {preset.name}: {brokers}")
+    print()
+
+    raw = prompt_input(f"Select presets to delete (enter without a selection to return) [1-{len(preset_items)}], comma-separated")
+    selected = _parse_number_selection(raw, len(preset_items))
+    if not selected:
+        print_warning("No presets selected")
+        return
+
+    user_toml = user_config_path(config_dir)
+    for idx in selected:
+        preset, broker_names = preset_items[idx - 1]
+        if not prompt_yes_no(f"Delete {preset.name}?", "n"):
+            continue
+        preset.unlink(missing_ok=True)
+        _remove_broker_overrides_toml(user_toml, broker_names)
+        print_success(f"Deleted {preset.name} and removed matching user overrides")
+
+
+def _parse_number_selection(raw: str, max_value: int) -> list[int]:
+    """Parse comma-separated numeric selections."""
+    selected: list[int] = []
+    seen: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            print_warning(f"Ignoring invalid selection: {part}")
+            continue
+        idx = int(part)
+        if idx < 1 or idx > max_value:
+            print_warning(f"Ignoring out-of-range selection: {part}")
+            continue
+        if idx not in seen:
+            selected.append(idx)
+            seen.add(idx)
+    return selected
+
+
+def _select_bundled_presets(ctx: InstallerContext) -> list[Path]:
+    """Prompt for one or more bundled presets."""
+    presets = list_bundled_presets(ctx.repo_dir)
+    if not presets:
+        print_warning("No bundled presets found")
+        return []
+
+    default_idx = 1
+    for idx, preset in enumerate(presets, 1):
+        if preset.name == "letsmesh.toml":
+            default_idx = idx
+            break
+
+    print()
+    print_info("Available broker presets:")
+    for idx, preset in enumerate(presets, 1):
+        print(f"  {idx}) {preset.name}")
+    print()
+
+    raw = prompt_input(f"Select presets [1-{len(presets)}], comma-separated", str(default_idx))
+    return [presets[idx - 1] for idx in _parse_number_selection(raw, len(presets))]
+
+
+def _next_custom_broker_number(config_dir: str) -> int:
+    """Choose the next custom broker number based on active config snippets."""
+    config_d = Path(config_dir) / "config.d"
     existing_count = 0
-    if Path(user_toml).exists():
-        content = Path(user_toml).read_text()
-        existing_count = content.count("[[broker]]")
+    for path in config_d.glob("*.toml"):
+        existing_count += path.read_text().count("[[broker]]")
+    return existing_count + 1
 
-    num_str = prompt_input("How many additional brokers?", "1")
-    try:
-        num_additional = int(num_str)
-    except ValueError:
-        num_additional = 1
 
-    for i in range(num_additional):
-        broker_num = existing_count + i + 1
-        configure_custom_broker(broker_num, ctx.config_dir)
+def _config_dir_has_broker(config_dir: str) -> bool:
+    """Return whether any active config drop-in already contains broker blocks."""
+    config_d = Path(config_dir) / "config.d"
+    if not config_d.is_dir():
+        return False
+    return any("[[broker]]" in path.read_text() for path in config_d.glob("*.toml"))
 
 
 # ---------------------------------------------------------------------------
@@ -631,7 +1166,7 @@ def _configure_additional_brokers(ctx: InstallerContext) -> None:
 
 def update_owner_info(config_dir: str) -> None:
     """Update owner public key and email for existing token-auth brokers."""
-    user_toml = f"{config_dir}/config.d/00-user.toml"
+    user_toml = str(migrate_user_config_filename(config_dir))
 
     if not Path(user_toml).exists():
         print_error("No configuration file found")
@@ -641,9 +1176,15 @@ def update_owner_info(config_dir: str) -> None:
     print_header("Update Owner Information")
 
     content = Path(user_toml).read_text()
-    if 'method = "token"' not in content:
+    has_token_presets = bool(token_preset_brokers(config_dir))
+    if 'method = "token"' not in content and not has_token_presets:
         print_warning("No brokers configured with auth token authentication")
         return
+
+    if has_token_presets:
+        _configure_token_preset_overrides(config_dir)
+        if 'method = "token"' not in content:
+            return
 
     print_info("This will update owner and email for all token-auth brokers")
     print()
@@ -732,7 +1273,7 @@ def update_owner_info(config_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _read_existing_iata(user_toml: str) -> str:
-    """Read the existing IATA code from 00-user.toml."""
+    """Read the existing IATA code from a user TOML."""
     if not Path(user_toml).exists():
         return ""
     content = Path(user_toml).read_text()
@@ -741,7 +1282,7 @@ def _read_existing_iata(user_toml: str) -> str:
 
 
 def _update_iata_in_file(user_toml: str, iata: str) -> None:
-    """Update the iata value in 00-user.toml."""
+    """Update the iata value in a user TOML."""
     content = Path(user_toml).read_text()
     content = re.sub(r'^(iata\s*=\s*).*$', f'\\1"{iata}"', content, flags=re.MULTILINE)
     Path(user_toml).write_text(content)

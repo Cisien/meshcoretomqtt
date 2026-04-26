@@ -24,7 +24,7 @@ class TestSetPermissions:
         config_d.mkdir()
         # Create test files
         (config_dir / "config.toml").write_text("[general]\n")
-        (config_d / "00-user.toml").write_text("[general]\niata = \"SEA\"\n")
+        (config_d / "99-user.toml").write_text("[general]\niata = \"SEA\"\n")
         return install_dir, config_dir
 
     def test_set_permissions_ownership(self, dirs: tuple[Path, Path]) -> None:
