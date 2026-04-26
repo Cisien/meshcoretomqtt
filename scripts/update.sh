@@ -12,16 +12,20 @@ EXTRA_ARGS=()
 # Try to read repo/branch from existing config
 INSTALL_DIR="${MCTOMQTT_INSTALL_DIR:-/opt/mctomqtt}"
 CONFIG_DIR="${MCTOMQTT_CONFIG_DIR:-/etc/mctomqtt}"
-if [ -f "$CONFIG_DIR/config.d/00-user.toml" ]; then
+USER_TOML="$CONFIG_DIR/config.d/99-user.toml"
+if [ ! -f "$USER_TOML" ] && [ -f "$CONFIG_DIR/config.d/00-user.toml" ]; then
+    USER_TOML="$CONFIG_DIR/config.d/00-user.toml"
+fi
+if [ -f "$USER_TOML" ]; then
     _repo=$(python3 -c "
 import tomllib
-with open('$CONFIG_DIR/config.d/00-user.toml', 'rb') as f:
+with open('$USER_TOML', 'rb') as f:
     c = tomllib.load(f)
 print(c.get('update', {}).get('repo', ''))
 " 2>/dev/null || true)
     _branch=$(python3 -c "
 import tomllib
-with open('$CONFIG_DIR/config.d/00-user.toml', 'rb') as f:
+with open('$USER_TOML', 'rb') as f:
     c = tomllib.load(f)
 print(c.get('update', {}).get('branch', ''))
 " 2>/dev/null || true)

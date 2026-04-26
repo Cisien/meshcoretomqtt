@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import os
 import platform
-import re
-import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .system import download_repo_archive, run_cmd
 from .ui import (
-    print_error,
     print_header,
     print_info,
     print_success,
@@ -289,7 +285,7 @@ def run_migrate(ctx: InstallerContext) -> bool:
     # Create config directory
     os.makedirs(f"{ctx.config_dir}/config.d", exist_ok=True)
 
-    migrated_toml_path = f"{ctx.config_dir}/config.d/00-user.toml"
+    migrated_toml_path = f"{ctx.config_dir}/config.d/99-user.toml"
 
     if not merged:
         print_warning("No user configuration found to migrate")

@@ -83,3 +83,53 @@ def test_update_detects_service_user_before_reconfigure(tmp_path: Path) -> None:
         "configure_mqtt_brokers:customsvc",
     ]
     assert ctx.svc_user == "customsvc"
+
+
+def test_update_reconfigure_preserves_user_toml(tmp_path: Path) -> None:
+    """Reconfigure must not delete existing custom broker overrides."""
+    repo_dir = tmp_path / "repo"
+    install_dir = tmp_path / "opt" / "mctomqtt"
+    config_dir = tmp_path / "etc" / "mctomqtt"
+    config_d = config_dir / "config.d"
+    work_dir = tmp_path / "work"
+    _write_repo_fixture(repo_dir)
+    install_dir.mkdir(parents=True)
+    config_d.mkdir(parents=True)
+    work_dir.mkdir()
+    (install_dir / "mctomqtt.py").write_text('__version__ = "old"\n')
+    user_toml = config_d / "99-user.toml"
+    content = (
+        '[general]\niata = "SEA"\n\n'
+        '[[broker]]\nname = "custom-override"\nserver = "mqtt.example.com"\n'
+    )
+    user_toml.write_text(content)
+
+    ctx = InstallerContext(
+        install_dir=str(install_dir),
+        config_dir=str(config_dir),
+        local_install=str(repo_dir),
+    )
+
+    def fake_configure_mqtt_brokers(_ctx: InstallerContext) -> None:
+        assert user_toml.exists()
+        assert user_toml.read_text() == content
+
+    with (
+        patch("installer.update_cmd.detect_system_type", return_value="manual"),
+        patch("installer.update_cmd.detect_service_user", return_value="customsvc"),
+        patch("installer.update_cmd.create_system_user"),
+        patch("installer.update_cmd.configure_mqtt_brokers", side_effect=fake_configure_mqtt_brokers),
+        patch("installer.update_cmd.create_venv"),
+        patch("installer.update_cmd.cleanup_legacy_nvm"),
+        patch("installer.update_cmd.set_permissions"),
+        patch("installer.update_cmd.create_version_info"),
+        patch("installer.update_cmd.prompt_yes_no", return_value=True),
+        patch(
+            "installer.update_cmd.run_cmd",
+            return_value=MagicMock(returncode=0, stdout="", stderr=""),
+        ),
+    ):
+        _do_update(ctx, str(work_dir))
+
+    assert user_toml.read_text() == content
+    assert list(config_d.glob("99-user.toml.backup-*"))

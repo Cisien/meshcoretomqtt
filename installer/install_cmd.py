@@ -11,15 +11,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import extract_version_from_file
-from .config import configure_mqtt_brokers, update_owner_info, _read_existing_iata, prompt_iata_letsmesh, prompt_iata_simple, _update_iata_in_file
-from .migrate_cmd import detect_old_installation, run_migrate
+from .config import (
+    configure_mqtt_brokers,
+    _read_existing_iata,
+    prompt_iata_letsmesh,
+    prompt_iata_simple,
+    _update_iata_in_file,
+    migrate_user_config_filename,
+    user_config_path,
+)
+from .migrate_cmd import run_migrate
 from .system import (
     create_system_user,
     create_venv,
     create_version_info,
-    detect_system_type,
     detect_system_type_native,
-    docker_cmd,
     download_file,
     download_repo_archive,
     install_docker_service,
@@ -90,7 +96,7 @@ def _do_install(ctx: InstallerContext, tmp_dir: str) -> None:
 
     # Check if functional installation exists
     updating_existing = False
-    user_toml = Path(ctx.config_dir) / "config.d" / "00-user.toml"
+    user_toml = migrate_user_config_filename(ctx.config_dir)
     has_existing = (
         Path(ctx.install_dir, "mctomqtt.py").exists()
         and user_toml.exists()
@@ -298,7 +304,7 @@ def _print_install_summary(ctx: InstallerContext, migration_done: bool) -> None:
     print(f"Configuration directory: {ctx.config_dir}")
     print()
     print(f"Base config: {ctx.config_dir}/config.toml")
-    print(f"User config: {ctx.config_dir}/config.d/00-user.toml")
+    print(f"User config: {user_config_path(ctx.config_dir)}")
     print()
 
     docker_installed = getattr(ctx, "_docker_installed", False)
@@ -357,11 +363,11 @@ def _check_python_version() -> None:
 
 
 def _handle_config_url(ctx: InstallerContext, user_toml: Path) -> None:
-    """Handle --config URL: download and set up 00-user.toml from a URL."""
+    """Handle --config URL: download and set up 99-user.toml from a URL."""
     print_info(f"Downloading configuration from: {ctx.config_url}")
 
     try:
-        download_file(ctx.config_url, str(user_toml), "00-user.toml")
+        download_file(ctx.config_url, str(user_toml), "99-user.toml")
     except subprocess.CalledProcessError:
         print_error("Failed to download configuration from URL")
         if prompt_yes_no("Continue with interactive configuration?", "y"):
@@ -406,9 +412,8 @@ def _handle_config_url(ctx: InstallerContext, user_toml: Path) -> None:
 
         if "[[broker]]" in content:
             print_success("MQTT brokers already configured in downloaded config")
-            if prompt_yes_no("Would you like to configure additional MQTT brokers?", "n"):
-                from .config import _configure_additional_brokers
-                _configure_additional_brokers(ctx)
+            if prompt_yes_no("Would you like to add broker presets or custom brokers?", "n"):
+                configure_mqtt_brokers(ctx)
         else:
             configure_mqtt_brokers(ctx)
     else:
