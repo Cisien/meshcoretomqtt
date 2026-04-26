@@ -75,6 +75,8 @@ def _do_install(ctx: InstallerContext, tmp_dir: str) -> None:
     print_header(f"MeshCore to MQTT Installer v{ctx.script_version}")
     print()
     print("This installer will help you set up MeshCore to MQTT relay.")
+    print("When a prompt shows a value in brackets, pressing Enter uses that value.")
+    print("If you are not sure what to enter, press Enter to use the default.")
     print()
 
     # ---------------------------------------------------------------------------
