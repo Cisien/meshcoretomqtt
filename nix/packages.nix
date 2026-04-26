@@ -1,4 +1,4 @@
-{self, ...}: {
+{self, lib, ...}: {
   imports = [
   ];
   perSystem = {
@@ -15,6 +15,31 @@
         install_date = "unknown";
       };
     };
+    ed25519-orlp = pkgs.python313.pkgs.buildPythonApplication (finalAttrs: {
+      pname = "ed25519-orlp";
+      version = "0.1.3";
+      pyproject = true;
+
+      src = pkgs.fetchPypi {
+        pname = "ed25519_orlp";
+        inherit (finalAttrs) version;
+        hash = "sha256-XfpS6PY2h/Ao7Q4/jis4W//SKmMMdAvmQtc6Uy0BN90=";
+      };
+
+      build-system = [
+        pkgs.python313.pkgs.setuptools
+      ];
+
+      pythonImportsCheck = [
+        "ed25519_orlp"
+      ];
+
+      meta = {
+        description = "Python wrapper around Orson Peters' Ed25519 implementation";
+        homepage = "https://pypi.org/project/ed25519-orlp";
+        license = lib.licenses.zlib;
+      };
+    });
   in {
     # Package definitions
     packages.default = pkgs.python313.pkgs.buildPythonPackage {
