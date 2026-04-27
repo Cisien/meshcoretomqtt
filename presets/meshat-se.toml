@@ -1,6 +1,7 @@
 # Preset for the Swedish broker on Meshat.se
+
 [[broker]]
-name = "meshat.se"
+name = "Meshat.se"
 enabled = true
 server = "mqtt.meshat.se"
 port = 8883
