@@ -1,0 +1,15 @@
+# Preset for the Swedish broker on Meshat.se
+
+[[broker]]
+name = "Meshat.se"
+enabled = true
+server = "mqtt.meshat.se"
+port = 8883
+
+[broker.auth]
+method = "password"
+username = "msh"
+password = "msh"
+
+[broker.tls]
+enabled = true
