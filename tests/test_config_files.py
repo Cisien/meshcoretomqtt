@@ -12,11 +12,13 @@ from unittest.mock import patch
 import pytest
 
 from config_loader import merge_broker_lists
+from installer import InstallerContext
 from installer.config import (
     _read_existing_iata,
     _read_remote_serial_companions,
     _rewrite_token_owner_overrides_toml,
     _set_remote_serial,
+    _select_bundled_presets,
     _toml_dumps,
     _update_iata_in_file,
     append_custom_broker_toml,
@@ -35,10 +37,6 @@ from installer.config import (
     validate_preset_toml,
     write_user_toml_base,
 )
-
-
-PROJECT_ROOT = Path(__file__).parent.parent
-
 
 class TestWriteUserTomlBase:
     def test_creates_file_with_sections(self, tmp_path: Path) -> None:
@@ -291,12 +289,18 @@ class TestPresetFiles:
     def test_preset_dest_path_prefixes_filename(self, tmp_path: Path) -> None:
         assert preset_dest_path(tmp_path, "letsmesh.toml") == tmp_path / "config.d" / "10-letsmesh.toml"
 
-    def test_letsmesh_preset_is_first_bundled_default(self) -> None:
-        presets = list_bundled_presets(PROJECT_ROOT)
-        names = [preset.name for preset in presets]
+    def test_letsmesh_preset_is_prompt_default(self, tmp_path: Path) -> None:
+        preset_dir = tmp_path / "presets"
+        preset_dir.mkdir()
+        (preset_dir / "custom.toml").write_text('[[broker]]\nname = "custom"\n')
+        (preset_dir / "letsmesh.toml").write_text('[[broker]]\nname = "letsmesh-us"\n')
 
-        assert "letsmesh.toml" in names
-        assert names.index("letsmesh.toml") == 0
+        ctx = InstallerContext(repo_dir=str(tmp_path))
+        with patch("installer.config.prompt_input", side_effect=lambda _prompt, default: default) as prompt:
+            selected = _select_bundled_presets(ctx)
+
+        prompt.assert_called_once_with("Select presets [1-2], comma-separated", "2")
+        assert [preset.name for preset in selected] == ["letsmesh.toml"]
 
     def test_validate_valid_preset(self, tmp_path: Path) -> None:
         preset = tmp_path / "letsmesh.toml"
@@ -719,4 +723,3 @@ class TestReadRemoteSerialCompanions:
 
     def test_empty_when_file_missing(self, tmp_path: Path) -> None:
         assert _read_remote_serial_companions(tmp_path / "missing.toml") == ""
-
