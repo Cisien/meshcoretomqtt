@@ -1,0 +1,19 @@
+# MeshMapper broker preset
+
+[[broker]]
+name = "meshmapper"
+enabled = true
+server = "mqtt.meshmapper.cc"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt.meshmapper.cc"
