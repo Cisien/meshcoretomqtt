@@ -1,0 +1,37 @@
+# Waev: real-time telemetry, monitoring, and analytics for MeshCore radio networks. Understand traffic. Monitor performance. Optimize your mesh. Built primarily for advanced pyMC users, but can benefit any user using mqtt capable firmware. Waev is built with a trust-but-verify philosophy, using meshcores most observable signals while valueing and protecting personally identifiable companion signals.
+
+[[broker]]
+name = "waev-a"
+enabled = true
+server = "mqtt-a.waev.app"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt-a.waev.app"
+
+[[broker]]
+name = "waev-b"
+enabled = true
+server = "mqtt-b.waev.app"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt-b.waev.app"
