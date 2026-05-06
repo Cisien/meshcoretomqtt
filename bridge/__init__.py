@@ -16,8 +16,8 @@ class MeshCoreBridge:
         self.state.client_version = runner.load_client_version(version)
         self.state.mqtt_manager = MqttManager(self.state)
 
-    def run(self) -> None:
-        runner.run(self.state)
+    def run(self) -> int:
+        return runner.run(self.state)
 
     def handle_signal(self, signum: int, frame: Any) -> None:
         runner.handle_signal(self.state, signum, frame)

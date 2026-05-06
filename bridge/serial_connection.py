@@ -70,18 +70,52 @@ class SerialConnection(ABC):
 class RealSerialConnection(SerialConnection):
     """Concrete implementation wrapping serial.Serial with internal locking."""
 
-    def __init__(self, port: serial.Serial) -> None:
+    def __init__(
+        self,
+        port: serial.Serial,
+        backlog_warning_bytes: int = 4096,
+        backlog_warning_interval: float = 60.0,
+    ) -> None:
         self._port = port
         self._lock = threading.Lock()
         self._last_activity = time.time()
+        self._backlog_warning_bytes = max(0, int(backlog_warning_bytes))
+        self._backlog_warning_interval = max(0.0, float(backlog_warning_interval))
+        self._last_backlog_warning = 0.0
 
     def _send(self, cmd: str, delay: float = 0.5) -> str:
         """Send command and read response under lock."""
         with self._lock:
             return self._send_unlocked(cmd, delay)
 
+    def _input_waiting_unlocked(self) -> int:
+        """Return queued serial input bytes without letting driver oddities escape."""
+        waiting = getattr(self._port, 'in_waiting', 0)
+        if not isinstance(waiting, (int, float)):
+            return 0
+        return max(0, int(waiting))
+
+    def _log_backlog_unlocked(self, context: str, *, force: bool = False) -> None:
+        waiting = self._input_waiting_unlocked()
+        if self._backlog_warning_bytes <= 0 or waiting < self._backlog_warning_bytes:
+            return
+
+        now = time.time()
+        if not force and (now - self._last_backlog_warning) < self._backlog_warning_interval:
+            return
+
+        self._last_backlog_warning = now
+        logger.warning(
+            "[SERIAL] Input backlog before %s: %d queued byte(s) "
+            "(threshold: %d). If this grows on busy nodes, serial reads may be falling behind.",
+            context,
+            waiting,
+            self._backlog_warning_bytes,
+        )
+
     def _send_unlocked(self, cmd: str, delay: float = 0.5) -> str:
         """Send command and read response (caller must hold lock)."""
+        self._log_backlog_unlocked(f"command {cmd.strip()!r}", force=True)
         self._port.reset_input_buffer()
         self._port.reset_output_buffer()
         self._port.write(cmd.encode())
@@ -258,6 +292,7 @@ class RealSerialConnection(SerialConnection):
     def execute_command(self, command: str, timeout: float = 10.0) -> tuple[bool, str]:
         try:
             with self._lock:
+                self._log_backlog_unlocked(f"remote command {command.strip()!r}", force=True)
                 self._port.reset_input_buffer()
                 self._port.reset_output_buffer()
 
@@ -313,6 +348,7 @@ class RealSerialConnection(SerialConnection):
 
     def read_line(self) -> str | None:
         with self._lock:
+            self._log_backlog_unlocked("read loop")
             if self._port.in_waiting > 0:
                 line = self._port.readline().decode(errors='replace').strip()
                 if line:
@@ -343,6 +379,8 @@ def connect(config: dict[str, Any]) -> RealSerialConnection | None:
     ports = serial_cfg.get('ports', ['/dev/ttyACM0'])
     baud_rate = serial_cfg.get('baud_rate', 115200)
     timeout = serial_cfg.get('timeout', 2)
+    backlog_warning_bytes = serial_cfg.get('backlog_warning_bytes', 4096)
+    backlog_warning_interval = serial_cfg.get('backlog_warning_interval', 60)
 
     for port in ports:
         try:
@@ -359,7 +397,11 @@ def connect(config: dict[str, Any]) -> RealSerialConnection | None:
             ser.reset_input_buffer()
             ser.reset_output_buffer()
             logger.info(f"Connected to {port}")
-            return RealSerialConnection(ser)
+            return RealSerialConnection(
+                ser,
+                backlog_warning_bytes=backlog_warning_bytes,
+                backlog_warning_interval=backlog_warning_interval,
+            )
         except (serial.SerialException, OSError) as e:
             logger.warning(f"Failed to connect to {port}: {str(e)}")
             continue

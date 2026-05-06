@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bridge.runner import load_client_version, handle_signal
+from bridge.runner import load_client_version, handle_signal, get_serial_watchdog_timeout
 from tests.fakes import FakeSerialConnection, FakeAuthProvider, make_test_state
 
 
@@ -25,6 +25,14 @@ class TestHandleSignal:
         assert state.should_exit is False
         handle_signal(state, 15, None)
         assert state.should_exit is True
+
+
+class TestSerialWatchdogConfig:
+    def test_zero_disables_watchdog(self):
+        assert get_serial_watchdog_timeout({'serial': {'watchdog_timeout': 0}}) == 0
+
+    def test_default_watchdog_timeout(self):
+        assert get_serial_watchdog_timeout({}) == 900
 
 
 class TestStartupPopulatesState:

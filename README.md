@@ -350,7 +350,20 @@ log_level = "INFO"
 # Wait for system clock sync before setting repeater time (default: true)
 # Set to false on systems without timedatectl or NTP
 sync_time = true
+
+[serial]
+# Warn if queued serial input reaches this many bytes
+backlog_warning_bytes = 4096
+
+# Set to 0 to disable forced serial reconnects
+watchdog_timeout = 900
 ```
+
+MQTT broker connections are tracked independently. If a broker is unavailable
+at startup or later disconnects without recovering, the bridge retries with
+exponential backoff capped at 20 minutes. After repeated consecutive failures,
+the process exits with status 1 so systemd, Docker, or another supervisor can
+restart it.
 
 ### Remote Serial (LetsMesh.net Experimental)
 

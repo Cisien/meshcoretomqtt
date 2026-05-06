@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -61,6 +62,23 @@ class TestMqttManagerCallbacks:
 
 
 class TestReconnectBehavior:
+    def _client_info(self, idx=0, **overrides):
+        info = {
+            "client": FakeBrokerClient(),
+            "broker_idx": idx,
+            "server": "localhost",
+            "port": 1883,
+            "connected": False,
+            "connecting_since": 0,
+            "connect_time": 0,
+            "reconnect_at": 0,
+            "reconnect_delay": 1.0,
+            "failed_attempts": 0,
+            "last_error": None,
+        }
+        info.update(overrides)
+        return info
+
     def test_skips_connected_brokers(self):
         state = make_test_state(repeater_name="TestNode", repeater_pub_key="AA" * 32)
         manager = MqttManager(state)
@@ -72,6 +90,102 @@ class TestReconnectBehavior:
         # Should not attempt reconnect for connected broker
         manager.reconnect_disconnected_brokers()
         assert state.mqtt_clients[0]['connected'] is True
+
+    def test_initial_failed_broker_stays_tracked_for_retry(self):
+        state = make_test_state(repeater_name="TestNode", repeater_pub_key="AA" * 32)
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+
+        with patch.object(manager, '_create_and_connect_broker', return_value=None):
+            connected = manager.connect_all_brokers()
+
+        assert connected is False
+        assert state.should_exit is False
+        assert len(state.mqtt_clients) == 1
+        assert state.mqtt_clients[0]['broker_idx'] == 0
+        assert state.mqtt_clients[0]['failed_attempts'] == 1
+        assert state.mqtt_clients[0]['reconnect_at'] > time.time()
+
+    def test_retry_preserves_failure_state_until_connack_success(self):
+        state = make_test_state(repeater_name="TestNode", repeater_pub_key="AA" * 32)
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+        state.mqtt_clients = [
+            self._client_info(client=None, failed_attempts=2, reconnect_delay=3.0, reconnect_at=0)
+        ]
+
+        new_client = FakeBrokerClient()
+        new_info = self._client_info(client=new_client, connecting_since=time.time())
+
+        with patch.object(manager, '_create_and_connect_broker', return_value=new_info):
+            manager.reconnect_disconnected_brokers()
+
+        assert state.mqtt_clients[0]['client'] is new_client
+        assert state.mqtt_clients[0]['failed_attempts'] == 2
+        assert state.mqtt_clients[0]['reconnect_delay'] == 3.0
+
+    def test_on_connect_failure_schedules_backoff(self):
+        state = make_test_state(repeater_name="TestNode", repeater_pub_key="AA" * 32)
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+        state.connection_events[0] = threading.Event()
+        state.mqtt_clients = [self._client_info(connecting_since=time.time())]
+
+        before = time.time()
+        manager.on_mqtt_connect(None, {'name': 'test', 'broker_idx': 0}, None, 5)
+        after = time.time()
+
+        info = state.mqtt_clients[0]
+        assert info['failed_attempts'] == 1
+        assert before + 1.0 <= info['reconnect_at'] <= after + 1.0
+        assert info['reconnect_delay'] == pytest.approx(1.5)
+        assert info['connecting_since'] == 0
+
+    def test_stalled_connection_attempt_schedules_backoff(self):
+        state = make_test_state(repeater_name="TestNode", repeater_pub_key="AA" * 32)
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+        state.mqtt_clients = [
+            self._client_info(connecting_since=time.time() - state.connection_attempt_timeout - 1)
+        ]
+
+        with patch.object(manager, '_create_and_connect_broker') as create_broker:
+            manager.reconnect_disconnected_brokers()
+
+        create_broker.assert_not_called()
+        assert state.mqtt_clients[0]['failed_attempts'] == 1
+        assert state.mqtt_clients[0]['reconnect_at'] > time.time()
+
+    def test_disconnect_during_connection_attempt_schedules_backoff(self):
+        state = make_test_state(repeater_name="TestNode", repeater_pub_key="AA" * 32)
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+        state.mqtt_clients = [self._client_info(connecting_since=time.time())]
+
+        before = time.time()
+        manager.on_mqtt_disconnect(None, {'name': 'test', 'broker_idx': 0}, None, "connection lost", None)
+        after = time.time()
+
+        info = state.mqtt_clients[0]
+        assert info['failed_attempts'] == 1
+        assert before + 1.0 <= info['reconnect_at'] <= after + 1.0
+        assert info['reconnect_delay'] == pytest.approx(1.5)
+
+    def test_exits_with_error_after_reconnect_failures_are_exhausted(self):
+        state = make_test_state(repeater_name="TestNode", repeater_pub_key="AA" * 32)
+        state.max_reconnect_attempts = 2
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+        state.mqtt_clients = [
+            self._client_info(client=None, failed_attempts=1, reconnect_at=0)
+        ]
+
+        with patch.object(manager, '_create_and_connect_broker', return_value=None):
+            manager.reconnect_disconnected_brokers()
+
+        assert state.should_exit is True
+        assert state.exit_code == 1
+        assert "consecutive failures" in (state.exit_reason or "")
 
     def test_clears_token_cache_on_reconnect(self):
         config = make_config()

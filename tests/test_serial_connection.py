@@ -1,6 +1,7 @@
 """Tests for RealSerialConnection parsing logic with mock serial.Serial."""
 from __future__ import annotations
 
+import logging
 import time
 from unittest.mock import MagicMock, PropertyMock
 
@@ -217,6 +218,19 @@ class TestExecuteCommand:
         success, response = conn.execute_command("get name")
         assert success is True
 
+    def test_logs_backlog_before_resetting_input(self, caplog):
+        mock_port = MagicMock(spec=serial.Serial)
+        mock_port.is_open = True
+        mock_port.in_waiting = 100
+        mock_port.read_all.return_value = b"ver\n  -> 1.8.2\n> "
+        conn = RealSerialConnection(mock_port, backlog_warning_bytes=10)
+
+        caplog.set_level(logging.WARNING, logger="bridge.serial_connection")
+        success, _ = conn.execute_command("ver")
+
+        assert success is True
+        assert "Input backlog before remote command 'ver': 100 queued byte(s)" in caplog.text
+
 
 # ------------------------------------------------------------------
 # read_line
@@ -256,6 +270,30 @@ class TestReadLine:
         conn._last_activity = time.time() - 100
         conn.read_line()
         assert conn.seconds_since_activity() >= 99
+
+    def test_logs_when_serial_input_queue_is_backed_up(self, caplog):
+        mock_port = MagicMock(spec=serial.Serial)
+        mock_port.is_open = True
+        mock_port.in_waiting = 100
+        mock_port.readline.return_value = b"test line\n"
+        conn = RealSerialConnection(mock_port, backlog_warning_bytes=10)
+
+        caplog.set_level(logging.WARNING, logger="bridge.serial_connection")
+        assert conn.read_line() == "test line"
+
+        assert "Input backlog before read loop: 100 queued byte(s)" in caplog.text
+
+    def test_backlog_logging_can_be_disabled(self, caplog):
+        mock_port = MagicMock(spec=serial.Serial)
+        mock_port.is_open = True
+        mock_port.in_waiting = 100
+        mock_port.readline.return_value = b"test line\n"
+        conn = RealSerialConnection(mock_port, backlog_warning_bytes=0)
+
+        caplog.set_level(logging.WARNING, logger="bridge.serial_connection")
+        assert conn.read_line() == "test line"
+
+        assert "Input backlog" not in caplog.text
 
 
 # ------------------------------------------------------------------

@@ -34,7 +34,15 @@ baud_rate = 115200
 # Serial read timeout in seconds
 timeout = 2
 
-# Watchdog: seconds with no data before forcing serial reconnect (0 to disable)
+# Log a warning when the serial input queue reaches this many bytes.
+# Set to 0 to disable backlog diagnostics.
+backlog_warning_bytes = 4096
+
+# Minimum seconds between repeated serial backlog warnings from the read loop
+backlog_warning_interval = 60
+
+# Watchdog: seconds with no data before forcing serial reconnect
+# Set to 0 to disable
 watchdog_timeout = 900
 
 [topics]

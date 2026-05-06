@@ -76,14 +76,24 @@ def wait_for_system_time_sync(state: BridgeState) -> bool:
     return True
 
 
-def run(state: BridgeState) -> None:
+def get_serial_watchdog_timeout(config: dict[str, Any]) -> float:
+    """Return the serial watchdog timeout; values <= 0 disable it."""
+    timeout = config.get('serial', {}).get('watchdog_timeout', 900)
+    try:
+        return float(timeout)
+    except (TypeError, ValueError):
+        logger.warning("Invalid serial.watchdog_timeout=%r; using 900s", timeout)
+        return 900.0
+
+
+def run(state: BridgeState) -> int:
     """Main orchestration: connect serial, query device, connect MQTT, read loop."""
     log_config_sources(state.config)
 
     # Connect serial
     state.device = serial_connection.connect(state.config)
     if not state.device:
-        return
+        return state.exit_code
 
     # Set up auth provider
     state.auth = MeshCoreAuthProvider()
@@ -97,12 +107,12 @@ def run(state: BridgeState) -> None:
     state.repeater_name = state.device.get_name()
     if not state.repeater_name:
         logger.error("Failed to get repeater name")
-        return
+        return state.exit_code
 
     state.repeater_pub_key = state.device.get_pubkey()
     if not state.repeater_pub_key:
         logger.error("Failed to get the repeater id (public key)")
-        return
+        return state.exit_code
 
     state.repeater_priv_key = state.device.get_privkey()
     if not state.repeater_priv_key:
@@ -111,7 +121,7 @@ def run(state: BridgeState) -> None:
     state.radio_info = state.device.get_radio_info()
     if not state.radio_info:
         logger.error("Failed to get radio info")
-        return
+        return state.exit_code
 
     state.firmware_version = state.device.get_firmware_version()
     if not state.firmware_version:
@@ -145,22 +155,11 @@ def run(state: BridgeState) -> None:
     else:
         logger.info("Remote serial: DISABLED")
 
-    # Initial MQTT connection
-    retry_count = 0
-    max_initial_retries = 10
-    while retry_count < max_initial_retries:
-        if state.mqtt_manager.connect_all_brokers():
-            break
-        else:
-            retry_count += 1
-            wait_time = min(retry_count * 2, 30)
-            logger.warning(f"[MQTT] Initial connection failed. Retrying in {wait_time}s... (attempt {retry_count}/{max_initial_retries})")
-            sleep(wait_time)
-
-    if retry_count >= max_initial_retries:
-        logger.error("[MQTT] Failed to establish initial connection after maximum retries")
-        state.should_exit = True
-        return
+    # Initial MQTT connection. Per-broker retry/backoff continues in the main loop.
+    if not state.mqtt_manager.connect_all_brokers():
+        if state.should_exit:
+            return state.exit_code
+        logger.warning("[MQTT] Starting main loop without an active broker; reconnect attempts will continue")
 
     # Start stats logging thread
     stats_thread = threading.Thread(
@@ -173,11 +172,13 @@ def run(state: BridgeState) -> None:
     logger.debug("[STATS] Started statistics logging thread")
 
     # Serial watchdog: force reconnect if no data received for this many seconds
-    serial_cfg = state.config.get('serial', {})
-    watchdog_timeout = serial_cfg.get('watchdog_timeout', 900)
+    watchdog_timeout = get_serial_watchdog_timeout(state.config)
+    watchdog_enabled = watchdog_timeout > 0
     watchdog_logged = False
     last_reconnect_attempt = 0.0
     reconnect_interval = 5  # seconds between retry attempts
+    if not watchdog_enabled:
+        logger.info("Serial watchdog disabled")
 
     # Main event loop
     try:
@@ -196,7 +197,7 @@ def run(state: BridgeState) -> None:
                         watchdog_logged = False
 
                     # Watchdog: detect silently dead serial connections
-                    elif state.device.seconds_since_activity() > watchdog_timeout:
+                    elif watchdog_enabled and state.device.seconds_since_activity() > watchdog_timeout:
                         if not watchdog_logged:
                             logger.warning(
                                 f"Serial watchdog: no data received for "
@@ -238,8 +239,11 @@ def run(state: BridgeState) -> None:
         logger.info("\nExiting...")
     except Exception as e:
         logger.exception(f"Unhandled error in main loop: {e}")
+        state.exit_code = 1
     finally:
         _cleanup(state, stats_thread)
+
+    return state.exit_code
 
 
 def _cleanup(state: BridgeState, stats_thread: threading.Thread) -> None:
@@ -260,7 +264,7 @@ def _cleanup(state: BridgeState, stats_thread: threading.Thread) -> None:
 
     # Publish offline status before disconnecting
     for mqtt_info in state.mqtt_clients:
-        if mqtt_info.get('connected'):
+        if mqtt_info.get('connected') and mqtt_info.get('client'):
             try:
                 publish_status(state, "offline",
                                client=mqtt_info['client'],
@@ -270,9 +274,12 @@ def _cleanup(state: BridgeState, stats_thread: threading.Thread) -> None:
 
     # Disconnect MQTT clients
     for mqtt_info in state.mqtt_clients:
+        client = mqtt_info.get('client')
+        if not client:
+            continue
         try:
-            mqtt_info['client'].loop_stop()
-            mqtt_info['client'].disconnect()
+            client.loop_stop()
+            client.disconnect()
         except Exception:
             pass
 

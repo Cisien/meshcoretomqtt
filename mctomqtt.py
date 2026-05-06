@@ -6,6 +6,7 @@ __version__ = "1.3.0.0-preview"
 import argparse
 import logging
 import signal
+import sys
 
 from config_loader import load_config
 from bridge import MeshCoreBridge
@@ -42,4 +43,4 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, bridge.handle_signal)
     signal.signal(signal.SIGINT, bridge.handle_signal)
 
-    bridge.run()
+    sys.exit(bridge.run())

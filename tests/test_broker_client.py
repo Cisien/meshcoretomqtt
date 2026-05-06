@@ -57,6 +57,25 @@ class TestSafePublish:
         assert result is False
         assert state.stats['publish_failures'] == 1
 
+    def test_skips_disconnected_broker_entries(self):
+        connected = FakeBrokerClient()
+        connected._connected = True
+        disconnected = FakeBrokerClient()
+        state = make_test_state(
+            broker_clients=[
+                {"client": connected, "broker_idx": 0, "connected": True},
+                {"client": disconnected, "broker_idx": 1, "connected": False},
+                {"client": None, "broker_idx": 2, "connected": False},
+            ],
+            repeater_pub_key="AA" * 32,
+        )
+
+        result = safe_publish(state, "packets", '{"msg":"hello"}')
+
+        assert result is True
+        assert len(connected.published) == 1
+        assert disconnected.published == []
+
     def test_single_broker_via_client(self):
         broker1 = FakeBrokerClient()
         broker1._connected = True

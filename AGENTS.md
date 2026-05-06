@@ -34,7 +34,7 @@ docker run -d --name mctomqtt --device=/dev/ttyACM0 \
 
 The runtime codebase is a `bridge/` Python package with a thin entry point (project metadata in `pyproject.toml`):
 
-- **`mctomqtt.py`** — Thin entry point (~45 lines). Keeps `__version__`, argparse, logging setup. Creates `MeshCoreBridge(config, debug, version)` and calls `bridge.run()`.
+- **`mctomqtt.py`** — Thin entry point (~45 lines). Keeps `__version__`, argparse, logging setup. Creates `MeshCoreBridge(config, debug, version)` and exits with the code returned by `bridge.run()`.
 
 - **`bridge/`** — Python package containing all application logic, split into focused modules:
   - **`serial_connection.py`** — `SerialConnection` ABC + `RealSerialConnection` (device I/O with internal locking) + `connect()` factory
@@ -104,7 +104,10 @@ See `config.toml.example` for the full reference with all options and defaults.
 ## Key Patterns
 
 - **Thread safety:** Serial port access is protected by internal locking in `RealSerialConnection`. The main loop, stats thread, and remote serial handler all call methods on the `SerialConnection` ABC — the lock is never exposed to callers.
+- **Serial backlog diagnostics:** `serial.backlog_warning_bytes` and `serial.backlog_warning_interval` only log when queued serial input appears to be backing up; they do not change read behavior.
+- **Serial watchdog:** Forced serial reconnects use `serial.watchdog_timeout`; values `<= 0` disable the watchdog.
 - **MQTT auth:** Two modes per broker — username/password or JWT auth tokens (generated from device's Ed25519 private key). Tokens are cached with TTL. Auth operations go through the `AuthProvider` ABC.
+- **MQTT reconnects:** Enabled brokers keep persistent state entries even when startup connection fails. Disconnects, failed CONNACKs, and stalled attempts retry with per-broker exponential backoff capped at 20 minutes; repeated failures set `state.exit_code = 1` so the service supervisor can restart the process.
 - **Graceful shutdown:** SIGTERM/SIGINT handlers set `state.should_exit = True`. The main loop checks this flag each iteration.
 - **Config access:** `state.config` dict with `state.config.get('section', {}).get('key', default)`. Broker configs accessed via `topics.get_broker_config(state, broker_idx)`.
 - **Version:** `__version__` is defined at the top of `mctomqtt.py`. The `.version_info` JSON file (created by installer) appends git hash info. Version is passed to `MeshCoreBridge(config, debug, version)`.

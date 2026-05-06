@@ -62,15 +62,19 @@ class BridgeState:
 
         # Lifecycle
         self.should_exit: bool = False
+        self.exit_code: int = 0
+        self.exit_reason: str | None = None
 
         # Config-derived values
         self.global_iata: str = config.get('general', {}).get('iata', 'XXX')
         self.sync_time_at_start: bool = config.get('general', {}).get('sync_time', True)
 
         # Reconnect params
-        self.max_reconnect_delay: float = 120.0
+        self.initial_reconnect_delay: float = 1.0
+        self.max_reconnect_delay: float = 20 * 60.0
         self.reconnect_backoff: float = 1.5
-        self.max_reconnect_attempts: int = 12
+        self.max_reconnect_attempts: int = 20
+        self.connection_attempt_timeout: float = 30.0
 
         # Token cache
         self.token_cache: dict[int, tuple[str, float]] = {}
