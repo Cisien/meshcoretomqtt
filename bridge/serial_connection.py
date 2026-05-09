@@ -79,7 +79,7 @@ class RealSerialConnection(SerialConnection):
     def _send(self, cmd: str) -> str:
         """Send command and read response under lock."""
         with self._lock:
-            return self._send_unlocked(cmd, delay)
+            return self._send_unlocked(cmd, self._cmd_delay)
 
     def _send_unlocked(self, cmd: str) -> str:
         """Send command and read response (caller must hold lock)."""
