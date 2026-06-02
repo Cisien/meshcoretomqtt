@@ -3,13 +3,17 @@
 [[broker]]
 name = "Meshat.se"
 enabled = true
-server = "mqtt.meshat.se"
-port = 8883
-
-[broker.auth]
-method = "password"
-username = "msh"
-password = "msh"
+server = "meshcore-mqtt.meshat.se"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
 
 [broker.tls]
 enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "meshcore-mqtt.meshat.se"
