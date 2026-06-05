@@ -3,7 +3,7 @@
 [[broker]]
 name = "meshmapper"
 enabled = true
-server = "mqtt.meshmapper.cc"
+server = "mqtt.meshmapper.net"
 port = 443
 transport = "websockets"
 keepalive = 60
@@ -16,4 +16,4 @@ verify = true
 
 [broker.auth]
 method = "token"
-audience = "mqtt.meshmapper.cc"
+audience = "mqtt.meshmapper.net"
