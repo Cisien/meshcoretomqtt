@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
 
 from . import topics
@@ -69,7 +69,7 @@ def build_status_message(state: BridgeState, status: str, include_stats: bool = 
     """Build a status message with all required fields."""
     message: dict[str, Any] = {
         "status": status,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "origin": state.repeater_name,
         "origin_id": state.repeater_pub_key,
         "radio": state.radio_info if state.radio_info else "unknown",

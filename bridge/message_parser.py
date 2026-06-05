@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from . import topics
@@ -34,7 +34,7 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
     message: dict = {
         "origin": state.repeater_name,
         "origin_id": state.repeater_pub_key,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
     # Handle RAW messages
