@@ -34,6 +34,9 @@ baud_rate = 115200
 # Serial read timeout in seconds
 timeout = 2
 
+# Delay between issuing a command and reading the result from the device
+cmd_delay = 0.5
+
 # Watchdog: seconds with no data before forcing serial reconnect (0 to disable)
 watchdog_timeout = 900
 
