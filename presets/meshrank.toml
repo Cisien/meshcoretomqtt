@@ -1,0 +1,22 @@
+# MeshRank.net broker preset
+
+[[broker]]
+name = "meshrank"
+enabled = true
+server = "meshrank.net"
+port = 8883
+transport = "tcp"
+keepalive = 60
+qos = 0
+retain = false
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "none"
+
+[broker.topics]
+packets = "meshcore/{IATA}/{PUBLIC_KEY}/packets"
+status = "meshcore/{IATA}/{PUBLIC_KEY}/status"
