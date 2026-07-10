@@ -50,8 +50,7 @@
       propagatedBuildInputs = with pkgs.python313Packages; [
         paho-mqtt
         pyserial
-        ed25519-orlp
-      ];
+      ] ++ [ ed25519-orlp ];  # reference the local variable outside the `with` scope
 
       nativeBuildInputs = [
         pkgs.makeWrapper
