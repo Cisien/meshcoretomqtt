@@ -50,8 +50,7 @@
       propagatedBuildInputs = with pkgs.python313Packages; [
         paho-mqtt
         pyserial
-        ed25519-orlp
-      ];
+      ] ++ [ ed25519-orlp ];  # reference the local variable outside the `with` scope
 
       nativeBuildInputs = [
         pkgs.makeWrapper
@@ -74,7 +73,7 @@
         mkdir -p $out/bin
         makeWrapper ${pkgs.python313.interpreter} $out/bin/mctomqtt \
           --add-flags "$out/${pkgs.python313.sitePackages}/mctomqtt.py" \
-          --set PYTHONPATH "$out/${pkgs.python313.sitePackages}:${pkgs.python313.withPackages (ps: with ps; [paho-mqtt pyserial ed25519-orlp])}/${pkgs.python313.sitePackages}"
+          --set PYTHONPATH "$out/${pkgs.python313.sitePackages}:${pkgs.python313.withPackages (ps: with ps; [paho-mqtt pyserial])}/${pkgs.python313.sitePackages}:${ed25519-orlp}/${pkgs.python313.sitePackages}"
       '';
 
       meta = {
