@@ -1,0 +1,19 @@
+# BSmesh.de broker preset
+
+[[broker]]
+name = "BSmesh"
+enabled = true
+server = "mqtt.bsmesh.de"
+port = 8885
+transport = "websockets"
+keepalive = 55
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt.bsmesh.de"
