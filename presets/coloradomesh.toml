@@ -4,7 +4,7 @@
 name = "coloradomesh"
 enabled = true
 server = "mqtt.meshcore.coloradomesh.org"
-port = 1883
+port = 443
 transport = "websockets"
 keepalive = 60
 qos = 0
