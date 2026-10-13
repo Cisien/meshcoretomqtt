@@ -1,0 +1,28 @@
+# Meshloom Stats community broker (mqtt.meshloom.app).
+# Stock LetsMesh JWT (no extra claims). Do not set token_ttl — mctomqtt
+# hardcodes 3600s. websocket_path is hardcoded to "/" in the client.
+# Requires [general] iata = "XXX" (a real [A-Z]{3} code, not XXX/LOC/AAA)
+# or a [broker.topics] iata override. Without it every publish is silently
+# dropped (AuthZ deny + EMQX deny_action = ignore).
+
+[[broker]]
+name = "meshloom"
+enabled = true
+server = "mqtt.meshloom.app"
+port = 443
+transport = "websockets"
+keepalive = 30
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt.meshloom.app"
+
+[broker.topics]
+packets = "meshcore/{IATA}/{PUBLIC_KEY}/packets"
+status = "meshcore/{IATA}/{PUBLIC_KEY}/status"
