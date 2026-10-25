@@ -1,46 +1,56 @@
 # BLE observer development
 
-These notes are for contributors. User requirements and configuration are in
-the [README](../README.md#optional-ble-repeater-observer-experimental).
-See [AGENTS.md](../AGENTS.md) for contributor rules and test boundaries.
+User setup is in the [README](../README.md#optional-ble-repeater-observer-experimental).
+These notes explain the implementation and how to test changes. Contributor
+conventions are in [AGENTS.md](../AGENTS.md).
 
-## Backend resource cleanup
+## Data path
 
-BLE teardown releases backend resources even when the physical link has already
-dropped. With Bleak 3.0.2, remote disconnection alone leaves its D-Bus connection
-open, allowing stale BlueZ notification sessions to survive reconnects. Cleanup
-still uses the existing bounded timeouts; frame validation, ACK rules, pairing
-and reconnect policy are unchanged. Offline regressions cover resource release,
-including the real Bleak backend when installed, but do not certify long-duration
-hardware reliability or guarantee cleanup if the backend hangs.
+`bridge/ble_connection.py` implements the existing device-transport interface.
+It assembles framed BLE notifications into complete log records, then feeds the
+same packet parser and MQTT publishing path used by USB serial.
 
-## Record delivery
+- A record is acknowledged only after complete, ordered reassembly in host RAM.
+- An acknowledgement does not mean MQTT delivery. A crash between ACK and
+  publication can lose data; there is no durable queue or replay guarantee.
+- BLE delivery failures and MQTT publication failures have separate counters.
 
-Complete records are ACKed after bounded host RAM reassembly, **not** MQTT
-receipt. BLE and MQTT loss/failure counters remain separate; there is no durable
-MQTT replay guarantee. Full power/RF, security/interruption and unattended field
-acceptance remain outside the short initial hardware checks.
+## Connection lifecycle
 
-## Startup cleanup and test conventions
+Bleak operations run on a dedicated event-loop thread. Callbacks carry a
+connection generation so callbacks from an old link cannot affect a new one.
+Teardown is bounded; it does not reset the Bluetooth adapter or change pairing.
 
-Device cleanup encloses initialization as well as packet processing. Failed
-startup getters, initialization exceptions and exhausted initial MQTT retries
-release the device; stop requests between retries do not start another attempt.
-This is not durable offline delivery or a guarantee against every forced-kill,
-controller or peripheral failure. No automatic Bluetooth reset is performed.
+Backend cleanup must run even after the physical link drops. In Bleak 3.0.2,
+the remote-disconnect callback leaves its D-Bus connection open until public
+`disconnect()` runs. Leaving that owner alive can preserve a BlueZ notification
+subscription across reconnects and produce duplicate notifications. Only
+`stop_notify()` requires a connected link. A hanging backend can still exceed
+the cleanup budget; the fix is not a guarantee of cleanup under every failure.
 
-External I/O is supplied through explicit factories for embedding and tests;
-normal CLI defaults, serial selection and network timeouts are unchanged.
-BLE tests use injected fakes, real temporary files and real UTC timestamp
-validation rather than global clock/core-module mocks. Permission fixtures use
-an explicit ownership callable with real filesystem operations. Installer
-runtime dependency argv is tested without executing installs or suppressing file
-operations.
+Runner cleanup also covers failed startup getters, initialization exceptions
+and exhausted initial MQTT retries. A stop request between retries must not
+start another attempt.
 
-## Cross-layer validation
+## Tests
 
-Standalone bridge tests report firmware-dependent C++ wire checks as skipped
-when no firmware tree is present. For cross-layer validation set
-`OBSERVER_SOURCE` to the exact reviewed, patched firmware checkout; an explicit
-invalid source fails rather than skipping. The whole-stack candidate workflow
-supplies that source and runs these checks.
+Run the full suite from the repository root:
+
+```sh
+uv run --system-certs --frozen --extra test pytest
+```
+
+For an offline run, prefix the command with `MCTOMQTT_SKIP_NETWORK=1`.
+This skips external-service checks; do not describe it as passing network tests.
+
+Tests inject device/broker I/O fakes while running real transport, parser and
+lifecycle code. `tests/test_ble_disconnected_cleanup.py` checks resource release
+after link loss; its optional real-Bleak case skips when Bleak is unavailable.
+The normal PR CI does not install Bleak or exercise Bluetooth hardware.
+
+Cross-layer wire checks need `OBSERVER_SOURCE` pointing to the exact patched
+firmware checkout. Without it, a standalone bridge checkout skips those checks;
+an explicitly invalid path fails. Supply that source when running these checks
+separately; the normal PR CI does not provide it.
+These source checks and unit tests do not establish RF, power, security or
+long-duration reliability on hardware; record those results separately.

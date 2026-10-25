@@ -19,31 +19,33 @@ logs include `hash=...`, while current repeater packet logs may not.
 
 ## Optional BLE repeater observer (experimental)
 
-USB serial remains the default. An opt-in `general.transport = "ble"` adapter
-supports the custom BLE repeater-observer protocol, **not** the Companion BLE
-protocol or stock repeater firmware. Initial hardware validation covers a
-SenseCAP Solar / P1-Pro repeater and a Linux BlueZ host; other repeater boards,
-Bluetooth adapters and host platforms are unvalidated and may need a port.
+Use Bluetooth instead of USB to receive repeater packet logs and forward them
+to MQTT. USB serial remains the default.
 
-See `config.toml.example` for explicit BLE peer selection and per-broker region
-settings, and validate the exact configuration before running it:
+BLE requires the [experimental observer firmware](https://github.com/throny/meshcore-ble-observer),
+not stock repeater or Companion firmware. Hardware testing so far covers a
+SenseCAP Solar / P1-Pro repeater with a Linux BlueZ host; other setups are untested.
+
+To use it:
+
+1. Pair and trust the repeater using the observer firmware's USB-authorized
+   enrollment procedure.
+2. Set `general.transport = "ble"` and the repeater's `ble.address` in your
+   configuration. See `config.toml.example` for BLE and per-broker settings.
+3. Validate that configuration, then start the bridge:
 
 ```sh
 python3 preflight_config.py --config /path/to/observer-config.toml
 python3 mctomqtt.py --config /path/to/observer-config.toml
 ```
 
-The peer must already be bonded/trusted through the firmware's physical
-operator-authorized enrollment flow. No automatic peer selection, pairing, firmware
-flashing, secret-key provisioning, or service installation is performed by the
-adapter. Private-key material used for broker signing stays in process memory.
-The inherited serial installer/unit is not a turnkey BLE deployment; review
-permissions, isolated configuration and rollback before enabling a BLE service.
+BLE setup is manual. The bridge does not flash or pair your device, and the
+standard USB installer is not a turnkey BLE installer.
+Before enabling a BLE service, review its permissions and use a separate config.
 
 Receiving data over BLE does **not** guarantee delivery to MQTT consumers.
 Buffered data is not durably stored or guaranteed to be replayed after an outage.
-Long-term unattended operation, power use and interruption recovery remain
-experimental.
+Long-term reliability and power use are still being evaluated.
 
 Implementation details and contributor testing notes are in the
 [BLE development guide](docs/ble-development.md).
