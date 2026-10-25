@@ -19,14 +19,6 @@ logs include `hash=...`, while current repeater packet logs may not.
 
 ## Optional BLE repeater observer (experimental)
 
-BLE teardown releases backend resources even when the physical link has already
-dropped. With Bleak 3.0.2, remote disconnection alone leaves its D-Bus connection
-open, allowing stale BlueZ notification sessions to survive reconnects. Cleanup
-still uses the existing bounded timeouts; frame validation, ACK rules, pairing
-and reconnect policy are unchanged. Offline regressions cover resource release,
-including the real Bleak backend when installed, but do not certify long-duration
-hardware reliability or guarantee cleanup if the backend hangs.
-
 USB serial remains the default. An opt-in `general.transport = "ble"` adapter
 supports the custom BLE repeater-observer protocol, **not** the Companion BLE
 protocol or stock repeater firmware. Initial hardware validation covers a
@@ -48,32 +40,13 @@ adapter. Private-key material used for broker signing stays in process memory.
 The inherited serial installer/unit is not a turnkey BLE deployment; review
 permissions, isolated configuration and rollback before enabling a BLE service.
 
-Complete records are ACKed after bounded host RAM reassembly, **not** MQTT
-receipt. BLE and MQTT loss/failure counters remain separate; there is no durable
-MQTT replay guarantee. Full power/RF, security/interruption and unattended field
-acceptance remain outside the short initial hardware checks.
+Receiving data over BLE does **not** guarantee delivery to MQTT consumers.
+Buffered data is not durably stored or guaranteed to be replayed after an outage.
+Long-term unattended operation, power use and interruption recovery remain
+experimental.
 
-Standalone bridge tests report firmware-dependent C++ wire checks as skipped
-when no firmware tree is present. For cross-layer validation set
-`OBSERVER_SOURCE` to the exact reviewed, patched firmware checkout; an explicit
-invalid source fails rather than skipping. The whole-stack candidate workflow
-supplies that source and runs these checks.
-
-### Startup cleanup and contributor conventions
-
-Device cleanup encloses initialization as well as packet processing. Failed
-startup getters, initialization exceptions and exhausted initial MQTT retries
-release the device; stop requests between retries do not start another attempt.
-This is not durable offline delivery or a guarantee against every forced-kill,
-controller or peripheral failure. No automatic Bluetooth reset is performed.
-
-External I/O is supplied through explicit factories for embedding and tests;
-normal CLI defaults, serial selection and network timeouts are unchanged.
-The new BLE tests use injected fakes, real temporary files and real UTC timestamp
-validation rather than global clock/core-module mocks. Permission fixtures use
-an explicit ownership callable with real filesystem operations. Installer
-runtime dependency argv is tested without executing installs or suppressing file
-operations. See `AGENTS.md` for contributor rules and test boundaries.
+Implementation details and contributor testing notes are in the
+[BLE development guide](docs/ble-development.md).
 
 ## Quick Install
 
