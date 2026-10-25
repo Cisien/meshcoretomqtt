@@ -621,14 +621,19 @@ class BleConnection(SerialConnection):
             if state is not None and self._lines:
                 state["delivery_gap"] = True
         try:
-            if getattr(client, "is_connected", False):
+            if self._loop and self._loop.is_running():
+                was_connected = bool(getattr(client, "is_connected", False))
                 async def teardown() -> bool:
                     # Give each operation its own budget. A timeout/cancellation
                     # in stop_notify must not consume disconnect's opportunity.
                     async def stop_notifications() -> None:
-                        await client.stop_notify(LOG_CHARACTERISTIC_UUID)
+                        if getattr(client, "is_connected", False):
+                            await client.stop_notify(LOG_CHARACTERISTIC_UUID)
 
                     async def disconnect_client() -> None:
+                        # A remote drop can leave backend resources alive.
+                        # Bleak 3.0.2 still owns its D-Bus connection until this
+                        # public cleanup runs, even when is_connected is false.
                         await client.disconnect()
 
                     stop_task = asyncio.create_task(stop_notifications())
@@ -674,7 +679,7 @@ class BleConnection(SerialConnection):
                             if task is not None and not task.done():
                                 task.cancel()
 
-                if self._run(teardown(), timeout=(2 * operation_timeout) + 0.2):
+                if self._run(teardown(), timeout=(2 * operation_timeout) + 0.2) and was_connected:
                     self.metrics["disconnects"] += 1
         except Exception:
             pass

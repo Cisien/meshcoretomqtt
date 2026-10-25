@@ -19,6 +19,14 @@ logs include `hash=...`, while current repeater packet logs may not.
 
 ## Optional BLE repeater observer (experimental)
 
+BLE teardown releases backend resources even when the physical link has already
+dropped. With Bleak 3.0.2, remote disconnection alone leaves its D-Bus connection
+open, allowing stale BlueZ notification sessions to survive reconnects. Cleanup
+still uses the existing bounded timeouts; frame validation, ACK rules, pairing
+and reconnect policy are unchanged. Offline regressions cover resource release,
+including the real Bleak backend when installed, but do not certify long-duration
+hardware reliability or guarantee cleanup if the backend hangs.
+
 USB serial remains the default. An opt-in `general.transport = "ble"` adapter
 supports the custom BLE repeater-observer protocol, **not** the Companion BLE
 protocol or stock repeater firmware. Initial hardware validation covers a
