@@ -17,6 +17,19 @@ One way of tracking a message through the mesh is filtering the MQTT data on the
 `hash` field when the source log format includes it. Dispatcher/serial packet
 logs include `hash=...`, while current repeater packet logs may not.
 
+## Optional Bluetooth connection (experimental)
+
+The `coc` transport receives a repeater's packet logs over Bluetooth LE instead
+of USB. It needs the CoC repeater firmware and a Linux/BlueZ helper.
+[Prebuilt helpers](https://github.com/throny/meshcoretomqtt/releases/tag/coc-helper-v0.1.0)
+are available for x86-64, ARM64 and ARMv7.
+
+USB serial remains the default. See [Bluetooth setup](docs/coc.md) to select CoC
+and configure the existing service. Your MQTT configuration stays in place.
+
+I've been running this on a P1-Pro with a Linux host since October 28. Battery
+use looks normal so far.
+
 ## Quick Install
 
 ### One-Line Installation (Recommended)

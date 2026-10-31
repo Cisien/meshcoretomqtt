@@ -106,14 +106,33 @@ def load_config(config_paths: list[str] | None = None) -> dict[str, Any]:
     return config
 
 
+def resolve_transport(config: dict[str, Any]) -> str:
+    """Select USB serial by default, or the explicitly enabled CoC backend."""
+    if 'transport' in config:
+        raise ValueError("Set general.transport, not a top-level transport key")
+    general = config.get('general', {})
+    if not isinstance(general, dict):
+        raise ValueError("general must be a TOML table")
+    transport = general.get('transport', 'serial')
+    if transport not in ('serial', 'coc'):
+        raise ValueError("general.transport must be 'serial' or 'coc'")
+    return transport
+
+
 def log_config_sources(config: dict[str, Any]) -> None:
     """Log configuration summary."""
+    transport = resolve_transport(config)
     general = config.get('general', {})
     brokers = config.get('broker', [])
     serial_cfg = config.get('serial', {})
 
     logger.info(f"IATA: {general.get('iata', 'XXX')}")
-    logger.info(f"Serial ports: {serial_cfg.get('ports', ['/dev/ttyACM0'])}")
+    logger.info(f"Transport: {transport}")
+    if transport == 'serial':
+        logger.info(f"Serial ports: {serial_cfg.get('ports', ['/dev/ttyACM0'])}")
+    elif transport == 'coc':
+        coc_cfg = config.get('coc', {})
+        logger.info("CoC observer peer configured: %s", isinstance(coc_cfg, dict) and bool(coc_cfg.get('address')))
     logger.info(f"Brokers configured: {len(brokers)}")
 
     for i, broker in enumerate(brokers):

@@ -12,3 +12,4 @@ uv.lock
 .codex
 .codex/
 .pytest_cache/
+coc-helper/target/
