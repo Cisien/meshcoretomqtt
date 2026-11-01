@@ -164,12 +164,16 @@ class TestGetDeviceStats:
         assert stats['rx_air_secs'] == 20
 
     def test_packets_stats(self):
+        # Reply format from MeshCore's StatsFormatHelper::formatPacketStats
         conn, _ = _make_conn([
             b'stats-core\n  -> Unknown command\n> ',
             b'stats-radio\n  -> Unknown command\n> ',
-            b'stats-packets\n  -> {"recv_errors":42}\n> ',
+            b'stats-packets\n  -> {"recv":1500,"sent":230,"flood_tx":200,"direct_tx":30,'
+            b'"flood_rx":1400,"direct_rx":100,"recv_errors":42}\n> ',
         ])
         stats = conn.get_device_stats()
+        assert stats['packets_received'] == 1500
+        assert stats['packets_sent'] == 230
         assert stats['recv_errors'] == 42
 
     def test_partial_support(self):
