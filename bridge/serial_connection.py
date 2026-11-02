@@ -236,7 +236,7 @@ class RealSerialConnection(SerialConnection):
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.debug(f"Failed to parse stats-radio: {e}")
 
-            # stats-packets: recv_errors
+            # stats-packets: recv, sent, recv_errors
             response = self._send_unlocked("stats-packets\r\n")
             logger.debug(f"Raw stats-packets response: {response}")
 
@@ -245,6 +245,10 @@ class RealSerialConnection(SerialConnection):
                     json_str = response.split("-> ", 1)[1].strip()
                     json_str = json_str.split('\n')[0].replace('\r', '').strip()
                     packets_stats: dict[str, Any] = json.loads(json_str)
+                    if 'recv' in packets_stats:
+                        stats['packets_received'] = packets_stats['recv']
+                    if 'sent' in packets_stats:
+                        stats['packets_sent'] = packets_stats['sent']
                     if 'recv_errors' in packets_stats:
                         stats['recv_errors'] = packets_stats['recv_errors']
                 except (json.JSONDecodeError, ValueError) as e:
