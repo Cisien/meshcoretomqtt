@@ -4,6 +4,7 @@ from __future__ import annotations
 import calendar
 import json
 import logging
+import re
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -13,6 +14,31 @@ from typing import Any
 import serial
 
 logger = logging.getLogger(__name__)
+
+RADIO2_REPLY_PATTERN = re.compile(
+    r"^\s*([0-9.]+),([0-9.]+),(\d+),(\d+),(rxtx|rx)\b(.*)$"
+)
+
+
+def parse_radio2_reply(response: str | None) -> dict[str, Any] | None:
+    """Parse a `get radio2` reply into {radio, mode, temporary}, or None.
+
+    The reply looks like "-> > 911.150,250.000,7,5,rxtx,32 (auto)", with
+    "; 0d2h0m (120 min) left" while a temporary profile runs, or "-> > off".
+    Firmware without a second radio profile answers with an error.
+    """
+    if not response or "-> >" not in response:
+        return None
+    reply = response.split("-> >", 1)[1].strip().split('\n')[0].strip()
+    match = RADIO2_REPLY_PATTERN.match(reply)
+    if not match:
+        return None
+    freq, bw, sf, cr, mode, rest = match.groups()
+    return {
+        "radio": f"{freq},{bw},{sf},{cr}",
+        "mode": mode,
+        "temporary": " left" in rest,
+    }
 
 
 class SerialConnection(ABC):
@@ -36,6 +62,10 @@ class SerialConnection(ABC):
 
     @abstractmethod
     def get_radio_info(self) -> str | None: ...
+
+    def get_radio2_info(self) -> dict[str, Any] | None:
+        """Second radio profile ({radio, mode, temporary}), or None if there is none."""
+        return None
 
     @abstractmethod
     def get_firmware_version(self) -> str | None: ...
@@ -165,6 +195,11 @@ class RealSerialConnection(SerialConnection):
 
         logger.error("Failed to get radio info from response")
         return None
+
+    def get_radio2_info(self) -> dict[str, Any] | None:
+        response = self._send("get radio2\r\n")
+        logger.debug(f"Raw radio2 response: {response}")
+        return parse_radio2_reply(response)
 
     def get_firmware_version(self) -> str | None:
         response = self._send("ver\r\n")

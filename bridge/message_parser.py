@@ -22,6 +22,9 @@ PACKET_PATTERN = re.compile(
     r"(?: hash=([0-9A-F]+))?"
     r"(?: \[(.*)\])?$"
 )
+# Firmware with a second radio profile (e.g. Keymind Cascade radio2) prints this
+# between the RAW and RX/TX lines of a packet heard or sent on that profile.
+RADIO_PATTERN = re.compile(r"\d{2}:\d{2}:\d{2} - \d{1,2}/\d{1,2}/\d{4} U RADIO: (radio\d+)\s*$")
 
 
 def parse_and_publish(state: BridgeState, line: str) -> None:
@@ -43,6 +46,8 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
         if len(parts) > 1:
             raw_hex = parts[1].strip()
             state.last_raw = raw_hex
+            # A new packet starts here; its RADIO line, if any, follows.
+            state.pending_radio_id = None
             state.stats['bytes_processed'] += len(raw_hex) // 2
 
     # Handle DEBUG messages
@@ -54,6 +59,12 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
             })
             safe_publish(state, "debug", json.dumps(message))
             return
+
+    # Remember which radio the next RX/TX line belongs to
+    radio_match = RADIO_PATTERN.match(line)
+    if radio_match:
+        state.pending_radio_id = radio_match.group(1)
+        return
 
     # Handle Packet messages (RX and TX)
     packet_match = PACKET_PATTERN.match(line)
@@ -88,6 +99,14 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
 
             if packet_match.group(6) == "D" and packet_match.group(13):
                 payload["path"] = packet_match.group(13)
+
+        # Packet heard or sent on a second radio profile; see RADIO_PATTERN.
+        if state.pending_radio_id:
+            radio_id = state.pending_radio_id
+            payload["rx_radio_id" if direction == "rx" else "tx_radio_id"] = radio_id
+            if radio_id == "radio2":
+                payload["mediamesh"] = True
+            state.pending_radio_id = None
 
         message.update(payload)
         safe_publish(state, "packets", json.dumps(message))
