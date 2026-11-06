@@ -43,7 +43,8 @@ The runtime codebase is a `bridge/` Python package with a thin entry point (proj
   - **`state.py`** — `BridgeState` shared mutable state container (all ~30 instance variables)
   - **`topics.py`** — Topic resolution: `get_topic()`, `resolve_topic_template()`, `sanitize_client_id()`
   - **`mqtt_publish.py`** — `safe_publish()`, `build_status_message()`, `publish_status()`
-  - **`message_parser.py`** — `RAW_PATTERN`, `PACKET_PATTERN`, `RADIO_PATTERN`, `parse_and_publish()`
+  - **`message_parser.py`** — `RAW_PATTERN`, `PACKET_PATTERN`, `PACKET_RADIO_PATTERN`, `parse_and_publish()`
+  - **`radio_profile.py`** — Second radio profile (radio2): `RadioId`, `RadioMode`, `RadioProfile`, `parse_get_radio2_reply()`, `packet_radio_tags()`
   - **`remote_serial.py`** — Remote serial command handling, nonce management, JWT validation
   - **`background.py`** — `stats_logging_loop()`, `websocket_ping_loop()`
   - **`mqtt_manager.py`** — `MqttManager` class orchestrating broker connections, reconnection, callbacks

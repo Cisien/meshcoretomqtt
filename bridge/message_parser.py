@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from . import topics
 from .mqtt_publish import safe_publish
+from .radio_profile import RadioId, packet_radio_tags
 
 if TYPE_CHECKING:
     from .state import BridgeState
@@ -22,9 +23,10 @@ PACKET_PATTERN = re.compile(
     r"(?: hash=([0-9A-F]+))?"
     r"(?: \[(.*)\])?$"
 )
-# Firmware with a second radio profile (e.g. Keymind Cascade radio2) prints this
-# between the RAW and RX/TX lines of a packet heard or sent on that profile.
-RADIO_PATTERN = re.compile(r"\d{2}:\d{2}:\d{2} - \d{1,2}/\d{1,2}/\d{4} U RADIO: (radio\d+)\s*$")
+PACKET_RADIO_PATTERN = re.compile(
+    r"(?P<time>\d{2}:\d{2}:\d{2}) - (?P<date>\d{1,2}/\d{1,2}/\d{4})"
+    rf" U RADIO: (?P<radio_id>{'|'.join(map(re.escape, RadioId))})\s*$"
+)
 
 
 def parse_and_publish(state: BridgeState, line: str) -> None:
@@ -60,10 +62,9 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
             safe_publish(state, "debug", json.dumps(message))
             return
 
-    # Remember which radio the next RX/TX line belongs to
-    radio_match = RADIO_PATTERN.match(line)
-    if radio_match:
-        state.pending_radio_id = radio_match.group(1)
+    packet_radio_match = PACKET_RADIO_PATTERN.match(line)
+    if packet_radio_match:
+        state.pending_radio_id = RadioId(packet_radio_match.group("radio_id"))
         return
 
     # Handle Packet messages (RX and TX)
@@ -100,13 +101,8 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
             if packet_match.group(6) == "D" and packet_match.group(13):
                 payload["path"] = packet_match.group(13)
 
-        # Packet heard or sent on a second radio profile; see RADIO_PATTERN.
-        if state.pending_radio_id:
-            radio_id = state.pending_radio_id
-            payload["rx_radio_id" if direction == "rx" else "tx_radio_id"] = radio_id
-            if radio_id == "radio2":
-                payload["mediamesh"] = True
-            state.pending_radio_id = None
+        payload.update(packet_radio_tags(direction, state.pending_radio_id))
+        state.pending_radio_id = None
 
         message.update(payload)
         safe_publish(state, "packets", json.dumps(message))

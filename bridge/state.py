@@ -9,6 +9,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from .serial_connection import SerialConnection
     from .auth_provider import AuthProvider
+    from .radio_profile import RadioId, RadioProfile
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,7 @@ class BridgeState:
         self.repeater_pub_key: str | None = None
         self.repeater_priv_key: str | None = None
         self.radio_info: str | None = None
-        # Second radio profile ({"radio", "mode", "temporary"}) or None
-        self.radio2_info: dict[str, Any] | None = None
+        self.radio2_profile: RadioProfile | None = None
         self.firmware_version: str | None = None
         self.model: str | None = None
         self.client_version: str = ""
@@ -110,7 +110,7 @@ class BridgeState:
 
         # Message parsing state
         self.last_raw: str | None = None
-        # Radio id from a "U RADIO: radioN" line, applied to the next RX/TX line
-        self.pending_radio_id: str | None = None
+        # From a PACKET_RADIO_PATTERN line; applies to the next RX/TX line only
+        self.pending_radio_id: RadioId | None = None
 
         logger.info("Configuration loaded from TOML")
