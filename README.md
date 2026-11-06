@@ -526,12 +526,12 @@ Learn at https://letsmesh.net/
 
 ### Second radio profile
 
-Some firmware (e.g. Keymind Cascade's `set radio2 ...`) can listen on a second
+Some firmware (e.g. mikecarper/MeshCore's `set radio2 ...`) can listen on a second
 radio profile alongside the main one. No configuration is needed here. When the
 device reports one:
 
 - the status message adds a `radios` list next to the usual `radio` field,
-  read with `get radio2` at startup and with the 5-minute stats refresh:
+  read with `get radio2` at startup (like `get radio`):
   ```
   "radios": [{"id": "radio2", "radio": "911.150,250.000,7,5", "mode": "rxtx", "temporary": false, "mediamesh": true}]
   ```

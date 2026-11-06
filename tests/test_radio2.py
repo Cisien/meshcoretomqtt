@@ -1,11 +1,11 @@
-"""Tests for second radio profile (radio2) reporting: packet log and status."""
+"""Tests for second radio profile (radio2) reporting."""
 from __future__ import annotations
 
 import json
 
-from bridge.message_parser import PACKET_RADIO_PATTERN, parse_and_publish
+from bridge.message_parser import parse_and_publish
 from bridge.mqtt_publish import build_status_message
-from bridge.radio_profile import RadioId, RadioMode, RadioProfile
+from bridge.radio2 import parse_radio2_reply
 from tests.fakes import FakeBrokerClient, FakeSerialConnection, make_test_state
 
 RAW = "12:34:56 - 29/10/2026 U RAW: 15A3"
@@ -30,20 +30,17 @@ def _packets(broker):
     return [json.loads(payload) for topic, payload, _, _ in broker.published if topic.endswith("/packets")]
 
 
-class TestPacketRadioPattern:
-    def test_matches_radio_line(self):
-        match = PACKET_RADIO_PATTERN.match(RADIO2)
-        assert match is not None
-        assert match.group("radio_id") == RadioId.SECOND
-        assert match.group("time") == "12:34:56"
-        assert match.group("date") == "29/10/2026"
+class TestRadioLine:
+    def test_sets_pending_radio_id(self):
+        state, _ = _state()
+        parse_and_publish(state, RADIO2)
+        assert state.pending_radio_id == "radio2"
 
-    def test_ignores_other_lines(self):
-        assert PACKET_RADIO_PATTERN.match(RAW) is None
-        assert PACKET_RADIO_PATTERN.match(RX) is None
-
-    def test_ignores_unknown_radio_ids(self):
-        assert PACKET_RADIO_PATTERN.match("12:34:56 - 29/10/2026 U RADIO: radio9") is None
+    def test_other_lines_do_not(self):
+        state, _ = _state()
+        for line in (RAW, RX):
+            parse_and_publish(state, line)
+        assert state.pending_radio_id is None
 
 
 class TestPacketTagging:
@@ -65,6 +62,14 @@ class TestPacketTagging:
         assert packet["tx_radio_id"] == "radio2"
         assert packet["mediamesh"] is True
         assert "rx_radio_id" not in packet
+
+    def test_other_radio_id_is_tagged_without_mediamesh(self):
+        state, broker = _state()
+        for line in (RAW, "12:34:56 - 29/10/2026 U RADIO: radio3", RX):
+            parse_and_publish(state, line)
+        (packet,) = _packets(broker)
+        assert packet["rx_radio_id"] == "radio3"
+        assert "mediamesh" not in packet
 
     def test_main_radio_packet_is_unchanged(self):
         state, broker = _state()
@@ -95,11 +100,39 @@ class TestPacketTagging:
         assert broker.published == []
 
 
+class TestParseRadio2Reply:
+    def test_rxtx(self):
+        assert parse_radio2_reply("get radio2\r\n  -> > 911.150,250.000,7,5,rxtx,32 (auto)\r\n") == {
+            "radio": "911.150,250.000,7,5", "mode": "rxtx", "temporary": False}
+
+    def test_real_firmware_suffixes(self):
+        # Replies seen from mikecarper/MeshCore v1.18.0 on a Wio Tracker L1 Pro
+        for reply in (
+            "get radio2\r\n  -> > 911.150,250.000,7,5,rxtx,40 (auto); timing self-test pending; wait=113s\r\n",
+            "get radio2\r\n  -> > 911.150,250.000,7,5,rxtx,40 (auto); WARN recommended preamble: radio2=40; switch=638us\r\n",
+        ):
+            assert parse_radio2_reply(reply) == {
+                "radio": "911.150,250.000,7,5", "mode": "rxtx", "temporary": False}
+
+    def test_rx_temporary(self):
+        reply = "  -> > 911.150,250.000,7,5,rx,32; 0d2h0m (120 min) left"
+        assert parse_radio2_reply(reply) == {
+            "radio": "911.150,250.000,7,5", "mode": "rx", "temporary": True}
+
+    def test_off(self):
+        assert parse_radio2_reply("  -> > off") is None
+
+    def test_unsupported_firmware(self):
+        assert parse_radio2_reply("  -> Unknown command") is None
+        assert parse_radio2_reply("") is None
+        assert parse_radio2_reply(None) is None
+
+
 class TestStatusMessage:
     def test_radios_added_when_radio2_on(self):
-        profile = RadioProfile(radio="911.150,250.000,7,5", mode=RadioMode.RXTX, temporary=False)
-        state = make_test_state(device=FakeSerialConnection(radio2_profile=profile))
-        state.radio2_profile = state.device.get_radio2_profile()
+        info = {"radio": "911.150,250.000,7,5", "mode": "rxtx", "temporary": False}
+        state = make_test_state(device=FakeSerialConnection(radio2_info=info))
+        state.radio2_info = state.device.get_radio2_info()
         message = build_status_message(state, "online")
         assert message["radios"] == [{
             "id": "radio2", "radio": "911.150,250.000,7,5", "mode": "rxtx",
@@ -107,5 +140,5 @@ class TestStatusMessage:
 
     def test_no_radios_without_radio2(self):
         state = make_test_state(device=FakeSerialConnection())
-        state.radio2_profile = state.device.get_radio2_profile()
+        state.radio2_info = state.device.get_radio2_info()
         assert "radios" not in build_status_message(state, "online")

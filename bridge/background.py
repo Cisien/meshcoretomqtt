@@ -28,7 +28,6 @@ def stats_logging_loop(state: BridgeState) -> None:
         # Fetch fresh device stats from serial
         logger.debug("[STATS] Fetching fresh device stats from serial...")
         if state.device:
-            state.radio2_profile = state.device.get_radio2_profile()
             device_stats = state.device.get_device_stats()
             if device_stats:
                 state.stats['device'] = device_stats
