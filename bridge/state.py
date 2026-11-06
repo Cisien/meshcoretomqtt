@@ -44,6 +44,8 @@ class BridgeState:
         self.repeater_pub_key: str | None = None
         self.repeater_priv_key: str | None = None
         self.radio_info: str | None = None
+        # Second radio profile ({"radio", "mode", "temporary"}) or None
+        self.radio2_info: dict[str, Any] | None = None
         self.firmware_version: str | None = None
         self.model: str | None = None
         self.client_version: str = ""
@@ -108,5 +110,7 @@ class BridgeState:
 
         # Message parsing state
         self.last_raw: str | None = None
+        # Radio id from a "U RADIO:" line, applied to the next RX/TX line
+        self.pending_radio_id: str | None = None
 
         logger.info("Configuration loaded from TOML")

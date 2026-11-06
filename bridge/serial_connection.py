@@ -12,6 +12,8 @@ from typing import Any
 
 import serial
 
+from .radio2 import parse_radio2_reply
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +38,10 @@ class SerialConnection(ABC):
 
     @abstractmethod
     def get_radio_info(self) -> str | None: ...
+
+    def get_radio2_info(self) -> dict[str, Any] | None:
+        """Second radio profile ({radio, mode, temporary}), or None if there is none."""
+        return None
 
     @abstractmethod
     def get_firmware_version(self) -> str | None: ...
@@ -165,6 +171,11 @@ class RealSerialConnection(SerialConnection):
 
         logger.error("Failed to get radio info from response")
         return None
+
+    def get_radio2_info(self) -> dict[str, Any] | None:
+        response = self._send("get radio2\r\n")
+        logger.debug(f"Raw radio2 response: {response}")
+        return parse_radio2_reply(response)
 
     def get_firmware_version(self) -> str | None:
         response = self._send("ver\r\n")

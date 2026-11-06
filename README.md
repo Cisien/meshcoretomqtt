@@ -524,6 +524,26 @@ Learn at https://letsmesh.net/
 
   **debug**: Debug info (if enabled on the repeater build).
 
+### Second radio profile
+
+Some firmware (e.g. mikecarper/MeshCore's `set radio2 ...`) can listen on a second
+radio profile alongside the main one. No configuration is needed here. When the
+device reports one:
+
+- the status message adds a `radios` list next to the usual `radio` field,
+  read with `get radio2` at startup (like `get radio`):
+  ```
+  "radios": [{"id": "radio2", "radio": "911.150,250.000,7,5", "mode": "rxtx", "temporary": false, "mediamesh": true}]
+  ```
+- a packet heard on that profile adds `"rx_radio_id": "radio2"`, one sent on it
+  adds `"tx_radio_id": "radio2"`, and both add `"mediamesh": true`. The firmware
+  marks these packets with a `U RADIO: radio2` line between their `RAW` and
+  `RX`/`TX` lines.
+
+These are the same keys the firmware's own MQTT client publishes. Firmware
+without a second profile behaves exactly as before: no `radios` field and no
+extra packet keys.
+
 ## Example MQTT data...
 
 Note: origin is the repeater node reporting the data to mqtt. Not the origin of

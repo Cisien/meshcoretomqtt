@@ -22,6 +22,8 @@ PACKET_PATTERN = re.compile(
     r"(?: hash=([0-9A-F]+))?"
     r"(?: \[(.*)\])?$"
 )
+# Radio id the firmware prints for a packet on its second radio profile
+MEDIAMESH_RADIO_ID = "radio2"
 
 
 def parse_and_publish(state: BridgeState, line: str) -> None:
@@ -43,6 +45,8 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
         if len(parts) > 1:
             raw_hex = parts[1].strip()
             state.last_raw = raw_hex
+            # A new packet starts here; its RADIO line, if any, follows.
+            state.pending_radio_id = None
             state.stats['bytes_processed'] += len(raw_hex) // 2
 
     # Handle DEBUG messages
@@ -54,6 +58,13 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
             })
             safe_publish(state, "debug", json.dumps(message))
             return
+
+    # Handle RADIO messages (which radio the next RX/TX line was on)
+    if "U RADIO:" in line:
+        parts = line.split("U RADIO:")
+        if len(parts) > 1:
+            state.pending_radio_id = parts[1].strip()
+        return
 
     # Handle Packet messages (RX and TX)
     packet_match = PACKET_PATTERN.match(line)
@@ -88,6 +99,13 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
 
             if packet_match.group(6) == "D" and packet_match.group(13):
                 payload["path"] = packet_match.group(13)
+
+        radio_id = state.pending_radio_id
+        state.pending_radio_id = None
+        if radio_id:
+            payload[f"{direction}_radio_id"] = radio_id
+        if radio_id == MEDIAMESH_RADIO_ID:
+            payload["mediamesh"] = True
 
         message.update(payload)
         safe_publish(state, "packets", json.dumps(message))
