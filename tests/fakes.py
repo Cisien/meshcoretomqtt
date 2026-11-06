@@ -6,7 +6,6 @@ import json
 import time
 from typing import Any
 
-from bridge.radio_profile import RadioProfile
 from bridge.serial_connection import SerialConnection
 from bridge.auth_provider import AuthProvider
 from bridge.broker_client import BrokerClient
@@ -23,7 +22,7 @@ class FakeSerialConnection(SerialConnection):
         pubkey: str | None = "AA" * 32,
         privkey: str | None = "BB" * 64,
         radio_info: str | None = "LoRa 915MHz",
-        radio2_profile: RadioProfile | None = None,
+        radio2_info: dict[str, Any] | None = None,
         firmware: str | None = "1.8.2",
         board_type: str | None = "Station G2",
         stats: dict[str, Any] | None = None,
@@ -34,7 +33,7 @@ class FakeSerialConnection(SerialConnection):
         self.pubkey = pubkey
         self.privkey = privkey
         self.radio_info = radio_info
-        self.radio2_profile = radio2_profile
+        self.radio2_info = radio2_info
         self.firmware = firmware
         self.board_type = board_type
         self._stats = stats or {}
@@ -60,8 +59,8 @@ class FakeSerialConnection(SerialConnection):
     def get_radio_info(self) -> str | None:
         return self.radio_info
 
-    def get_radio2_profile(self) -> RadioProfile | None:
-        return self.radio2_profile
+    def get_radio2_info(self) -> dict[str, Any] | None:
+        return self.radio2_info
 
     def get_firmware_version(self) -> str | None:
         return self.firmware

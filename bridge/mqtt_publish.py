@@ -78,8 +78,10 @@ def build_status_message(state: BridgeState, status: str, include_stats: bool = 
         "client_version": state.client_version
     }
 
-    if state.radio2_profile:
-        message["radios"] = [state.radio2_profile.status_entry()]
+    # Second radio profile, in the multi-radio shape analyzers read
+    # (the same keys the firmware's own MQTT bridge publishes).
+    if state.radio2_info:
+        message["radios"] = [{"id": "radio2", **state.radio2_info, "mediamesh": True}]
 
     if include_stats and state.stats['device']:
         message['stats'] = state.stats['device']

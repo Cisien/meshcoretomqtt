@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from . import topics
 from .mqtt_publish import safe_publish
-from .radio_profile import RadioId, packet_radio_tags
 
 if TYPE_CHECKING:
     from .state import BridgeState
@@ -23,10 +22,8 @@ PACKET_PATTERN = re.compile(
     r"(?: hash=([0-9A-F]+))?"
     r"(?: \[(.*)\])?$"
 )
-PACKET_RADIO_PATTERN = re.compile(
-    r"(?P<time>\d{2}:\d{2}:\d{2}) - (?P<date>\d{1,2}/\d{1,2}/\d{4})"
-    rf" U RADIO: (?P<radio_id>{'|'.join(map(re.escape, RadioId))})\s*$"
-)
+# Radio id the firmware prints for a packet on its second radio profile
+MEDIAMESH_RADIO_ID = "radio2"
 
 
 def parse_and_publish(state: BridgeState, line: str) -> None:
@@ -62,9 +59,11 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
             safe_publish(state, "debug", json.dumps(message))
             return
 
-    packet_radio_match = PACKET_RADIO_PATTERN.match(line)
-    if packet_radio_match:
-        state.pending_radio_id = RadioId(packet_radio_match.group("radio_id"))
+    # Handle RADIO messages (which radio the next RX/TX line was on)
+    if "U RADIO:" in line:
+        parts = line.split("U RADIO:")
+        if len(parts) > 1:
+            state.pending_radio_id = parts[1].strip()
         return
 
     # Handle Packet messages (RX and TX)
@@ -101,8 +100,12 @@ def parse_and_publish(state: BridgeState, line: str) -> None:
             if packet_match.group(6) == "D" and packet_match.group(13):
                 payload["path"] = packet_match.group(13)
 
-        payload.update(packet_radio_tags(direction, state.pending_radio_id))
+        radio_id = state.pending_radio_id
         state.pending_radio_id = None
+        if radio_id:
+            payload[f"{direction}_radio_id"] = radio_id
+        if radio_id == MEDIAMESH_RADIO_ID:
+            payload["mediamesh"] = True
 
         message.update(payload)
         safe_publish(state, "packets", json.dumps(message))
