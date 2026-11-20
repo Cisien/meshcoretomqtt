@@ -1,4 +1,36 @@
-# meshcoretomqtt
+# meshcoretomqtt (CascadiaMesh version, with MediaMesh)
+
+This is [Cisien/meshcoretomqtt](https://github.com/Cisien/meshcoretomqtt) plus support for a
+repeater's **second radio profile (radio2)**, which carries MediaMesh: photos, video and voice on
+Keymind Cascade repeaters. Observers running it show MediaMesh traffic on the
+[CascadiaMesh analyzer](https://analyzer.cascadiamesh.org/#/analytics?tab=mediamesh). On a repeater
+without a second profile it behaves exactly like the regular meshcoretomqtt, and it is kept up to
+date with it.
+
+**Already running meshcoretomqtt?** One command switches it, keeping your config and brokers:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jade-on-mesh/meshcoretomqtt/radio2-profile/scripts/switch-to-cascadiamesh.sh | sudo bash
+```
+
+It points updates at this version (so every later update stays on it), adds the CascadiaMesh
+analyzer's broker unless you already send to it (add `-s -- --no-broker` after `bash` to skip that),
+and updates. Then turn the repeater's USB packet log on, so radio2 packets reach it:
+`set usb.logging on` and `set usb.logging.always on`.
+
+**New install:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jade-on-mesh/meshcoretomqtt/radio2-profile/install.sh | sudo bash
+```
+
+Pick **cascadiamesh** among the broker presets. See [Second radio profile](#second-radio-profile)
+for what it adds to the MQTT data. To go back to the regular version, set `repo` and `branch` under
+`[update]` in `/etc/mctomqtt/config.d/99-user.toml` to `Cisien/meshcoretomqtt` and `main`, then
+update.
+
+---
+
 
 A Python-based script to send MeshCore debug and packet capture data to MQTT for
 analysis. Requires a MeshCore repeater to be connected to a Raspberry Pi,

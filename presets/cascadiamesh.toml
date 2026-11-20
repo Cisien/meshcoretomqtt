@@ -1,0 +1,19 @@
+# CascadiaMesh Analyzer (analyzer.cascadiamesh.org): the Pacific Northwest's MeshCore analyzer, with MediaMesh (radio2: photos, video and voice) on its own tab. Repeaters with a second radio profile report it here.
+
+[[broker]]
+name = "cascadiamesh"
+enabled = true
+server = "mqtt-v1.cascadiamesh.org"
+port = 443
+transport = "websockets"
+keepalive = 60
+qos = 0
+retain = true
+
+[broker.tls]
+enabled = true
+verify = true
+
+[broker.auth]
+method = "token"
+audience = "mqtt-v1.cascadiamesh.org"

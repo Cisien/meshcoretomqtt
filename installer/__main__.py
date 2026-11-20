@@ -27,6 +27,9 @@ def main() -> None:
 
     sub.add_parser("migrate", help="Migrate legacy ~/.meshcoretomqtt installation")
 
+    switch_p = sub.add_parser("switch", help="Switch an existing install to the CascadiaMesh version (MediaMesh)")
+    switch_p.add_argument("--no-broker", action="store_true", help="Don't add the CascadiaMesh analyzer's broker")
+
     args: argparse.Namespace = parser.parse_args()
 
     if not args.command:
@@ -51,6 +54,11 @@ def main() -> None:
         ctx.update_mode = True
         from .update_cmd import run_update
         run_update(ctx)
+
+    elif args.command == "switch":
+        ctx.repo_dir = os.environ.get("SWITCH_REPO_DIR", "")
+        from .switch_cmd import run_switch
+        run_switch(ctx, add_broker=not args.no_broker)
 
     elif args.command == "migrate":
         from .migrate_cmd import run_migrate
