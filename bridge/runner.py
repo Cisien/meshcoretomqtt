@@ -113,6 +113,10 @@ def run(state: BridgeState) -> None:
         logger.error("Failed to get radio info")
         return
 
+    state.radio2_info = state.device.get_radio2_info()
+    if state.radio2_info:
+        logger.info(f"Second radio profile: {state.radio2_info}")
+
     state.firmware_version = state.device.get_firmware_version()
     if not state.firmware_version:
         logger.warning("Failed to get firmware version - will continue without it")

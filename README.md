@@ -1,4 +1,36 @@
-# meshcoretomqtt
+# meshcoretomqtt (CascadiaMesh version, with MediaMesh)
+
+This is [Cisien/meshcoretomqtt](https://github.com/Cisien/meshcoretomqtt) plus support for a
+repeater's **second radio profile (radio2)**, which carries MediaMesh: photos, video and voice on
+Keymind Cascade repeaters. Observers running it show MediaMesh traffic on the
+[CascadiaMesh analyzer](https://analyzer.cascadiamesh.org/#/analytics?tab=mediamesh). On a repeater
+without a second profile it behaves exactly like the regular meshcoretomqtt, and it is kept up to
+date with it.
+
+**Already running meshcoretomqtt?** One command switches it, keeping your config and brokers:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jade-on-mesh/meshcoretomqtt/radio2-profile/scripts/switch-to-cascadiamesh.sh | sudo bash
+```
+
+It points updates at this version (so every later update stays on it), adds the CascadiaMesh
+analyzer's broker unless you already send to it (add `-s -- --no-broker` after `bash` to skip that),
+and updates. Then turn the repeater's USB packet log on, so radio2 packets reach it:
+`set usb.logging on` and `set usb.logging.always on`.
+
+**New install:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jade-on-mesh/meshcoretomqtt/radio2-profile/install.sh | sudo bash
+```
+
+Pick **cascadiamesh** among the broker presets. See [Second radio profile](#second-radio-profile)
+for what it adds to the MQTT data. To go back to the regular version, set `repo` and `branch` under
+`[update]` in `/etc/mctomqtt/config.d/99-user.toml` to `Cisien/meshcoretomqtt` and `main`, then
+update.
+
+---
+
 
 A Python-based script to send MeshCore debug and packet capture data to MQTT for
 analysis. Requires a MeshCore repeater to be connected to a Raspberry Pi,
@@ -523,6 +555,26 @@ Learn at https://letsmesh.net/
   **packets**: Flood or direct packets going through the repeater.
 
   **debug**: Debug info (if enabled on the repeater build).
+
+### Second radio profile
+
+Some firmware (e.g. mikecarper/MeshCore's `set radio2 ...`) can listen on a second
+radio profile alongside the main one. No configuration is needed here. When the
+device reports one:
+
+- the status message adds a `radios` list next to the usual `radio` field,
+  read with `get radio2` at startup (like `get radio`):
+  ```
+  "radios": [{"id": "radio2", "radio": "911.150,250.000,7,5", "mode": "rxtx", "temporary": false, "mediamesh": true}]
+  ```
+- a packet heard on that profile adds `"rx_radio_id": "radio2"`, one sent on it
+  adds `"tx_radio_id": "radio2"`, and both add `"mediamesh": true`. The firmware
+  marks these packets with a `U RADIO: radio2` line between their `RAW` and
+  `RX`/`TX` lines.
+
+These are the same keys the firmware's own MQTT client publishes. Firmware
+without a second profile behaves exactly as before: no `radios` field and no
+extra packet keys.
 
 ## Example MQTT data...
 

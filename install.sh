@@ -5,8 +5,8 @@
 # ============================================================================
 set -e
 
-REPO="${MCTOMQTT_REPO:-Cisien/meshcoretomqtt}"
-BRANCH="${MCTOMQTT_BRANCH:-main}"
+REPO="${MCTOMQTT_REPO:-jade-on-mesh/meshcoretomqtt}"
+BRANCH="${MCTOMQTT_BRANCH:-radio2-profile}"
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
