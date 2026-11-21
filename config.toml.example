@@ -23,6 +23,8 @@ log_level = "INFO"
 
 # Wait for system clock sync (via timedatectl) before setting repeater time
 sync_time = true
+# Device connection: "serial" (default) or the optional Linux CoC helper.
+transport = "serial"
 
 [serial]
 # Serial ports to try connecting to (first successful port is used)
@@ -36,6 +38,14 @@ timeout = 2
 
 # Watchdog: seconds with no data before forcing serial reconnect (0 to disable)
 watchdog_timeout = 900
+
+[coc]
+# Required only when general.transport = "coc". Enroll and pin the peer first.
+# address = "02:00:00:00:00:01"
+# adapter = "hci0"
+# helper = "/opt/mctomqtt/bin/observer-coc-helper"
+# data_socket = "/run/mctomqtt-coc/data.sock"
+# control_socket = "/run/mctomqtt-coc/control.sock"
 
 [topics]
 # Topic templates - supported variables: {IATA}, {PUBLIC_KEY}

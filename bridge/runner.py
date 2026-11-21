@@ -10,9 +10,10 @@ import time
 from time import sleep
 from typing import Any, TYPE_CHECKING
 
-from config_loader import log_config_sources
+from config_loader import log_config_sources, resolve_transport
 
 from . import serial_connection
+from . import coc_connection
 from . import message_parser
 from . import background
 from .auth_provider import MeshCoreAuthProvider
@@ -22,6 +23,32 @@ if TYPE_CHECKING:
     from .state import BridgeState
 
 logger = logging.getLogger(__name__)
+
+
+def process_device_line(state: BridgeState) -> bool:
+    """Pass one accepted classic line to the unchanged parser."""
+    line = state.device.read_line()
+    if not line:
+        return False
+    if getattr(state.device, "record_gap_before_line", False):
+        state.last_raw = None
+    # CoC also carries key replies; never dump its unclassified stream to logs.
+    if not isinstance(state.device, coc_connection.CocConnection):
+        logger.debug(f"RX: {line}")
+    message_parser.parse_and_publish(state, line)
+    return True
+
+
+def connect_transport(config: dict[str, Any], *, serial_factory=None, coc_factory=None):
+    """Connect the explicitly selected device transport; serial is the default."""
+    try:
+        transport = resolve_transport(config)
+    except ValueError as exc:
+        logger.error("Invalid transport configuration: %s", exc)
+        return None
+    if transport == 'serial':
+        return (serial_connection.connect if serial_factory is None else serial_factory)(config)
+    return (coc_connection.connect if coc_factory is None else coc_factory)(config)
 
 
 def load_client_version(version: str) -> str:
@@ -47,41 +74,82 @@ def handle_signal(state: BridgeState, signum: int, frame: Any) -> None:
     state.should_exit = True
 
 
-def wait_for_system_time_sync(state: BridgeState) -> bool:
+def wait_for_system_time_sync(state: BridgeState, *, require_sync: bool = False,
+                              status_reader=None, retry_wait=None) -> bool:
     """Wait up to 60 seconds for system clock synchronization via timedatectl."""
     attempts = 0
     while attempts < 60 and not state.should_exit:
         try:
-            result = subprocess.run(
-                ['timedatectl', 'status'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            if status_reader is None:
+                command = (['timedatectl', 'show', '-p', 'NTPSynchronized', '--value']
+                           if require_sync else ['timedatectl', 'status'])
+                result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            else:
+                result = status_reader()
         except FileNotFoundError:
             logger.warning("timedatectl not found — skipping sync check and continuing.")
-            return True
+            return not require_sync
         except Exception as e:
             logger.warning("Error checking time sync (%s). Continuing.", e)
-            return True
+            return not require_sync
 
-        if "System clock synchronized: yes" in result.stdout:
+        if ((require_sync and result.returncode == 0 and result.stdout.strip() == 'yes')
+                or (not require_sync and "System clock synchronized: yes" in result.stdout)):
             return True
         logger.warning("System clock is not synchronized: %s",
                        result.stderr.strip() or result.stdout.strip())
         attempts += 1
-        time.sleep(1)
+        if retry_wait is None:
+            time.sleep(1)
+        else:
+            retry_wait()
 
     logger.warning("Timed out waiting for system clock sync — continuing anyway.")
-    return True
+    return not require_sync
 
 
-def run(state: BridgeState) -> None:
+def _connect_device(state: BridgeState, transport_factory, *, time_sync_wait=None):
+    """Restore CoC device time after startup or radio reconnect, when enabled."""
+    state.device = transport_factory(state.config)
+    if (state.device and resolve_transport(state.config) == "coc"
+            and state.sync_time_at_start and not state.should_exit):
+        synchronized = (wait_for_system_time_sync(state, require_sync=True)
+                        if time_sync_wait is None else time_sync_wait(state))
+        if synchronized and not state.should_exit:
+            try:
+                state.device.set_time()
+                logger.info("CoC repeater clock synchronized to host UTC")
+            except OSError:
+                logger.warning("CoC repeater clock synchronization failed; retry on next connection")
+        else:
+            logger.warning("CoC repeater clock unchanged: host UTC not verified or stopping")
+    return state.device
+
+
+def run(state: BridgeState, *, transport_factory=None) -> None:
     """Main orchestration: connect serial, query device, connect MQTT, read loop."""
+    stats_thread = threading.Thread(
+        target=background.stats_logging_loop,
+        args=(state,),
+        daemon=True,
+        name="Stats-Logger",
+    )
+    # Startup owns a device before MQTT can be established. Keep its resource
+    # lifetime inside the same finally as the main loop: an early return must
+    # not leave a BlueZ connection alive after this process exits.
+    try:
+        _run(state, stats_thread,
+             connect_transport if transport_factory is None else transport_factory)
+    finally:
+        _cleanup(state, stats_thread)
+
+
+def _run(state: BridgeState, stats_thread: threading.Thread, transport_factory) -> None:
+    """Run startup and packet processing within the caller's cleanup scope."""
     log_config_sources(state.config)
 
-    # Connect serial
-    state.device = serial_connection.connect(state.config)
+    # Connect selected transport (serial remains the backwards-compatible default).
+    state.device = _connect_device(state, transport_factory)
     if not state.device:
         return
 
@@ -89,7 +157,7 @@ def run(state: BridgeState) -> None:
     state.auth = MeshCoreAuthProvider()
 
     # Time sync
-    if state.sync_time_at_start:
+    if state.sync_time_at_start and resolve_transport(state.config) != "coc":
         wait_for_system_time_sync(state)
         state.device.set_time()
 
@@ -148,14 +216,19 @@ def run(state: BridgeState) -> None:
     # Initial MQTT connection
     retry_count = 0
     max_initial_retries = 10
-    while retry_count < max_initial_retries:
+    while retry_count < max_initial_retries and not state.should_exit:
         if state.mqtt_manager.connect_all_brokers():
             break
         else:
+            if state.should_exit:
+                return
             retry_count += 1
             wait_time = min(retry_count * 2, 30)
             logger.warning(f"[MQTT] Initial connection failed. Retrying in {wait_time}s... (attempt {retry_count}/{max_initial_retries})")
             sleep(wait_time)
+
+    if state.should_exit:
+        return
 
     if retry_count >= max_initial_retries:
         logger.error("[MQTT] Failed to establish initial connection after maximum retries")
@@ -163,18 +236,14 @@ def run(state: BridgeState) -> None:
         return
 
     # Start stats logging thread
-    stats_thread = threading.Thread(
-        target=background.stats_logging_loop,
-        args=(state,),
-        daemon=True,
-        name="Stats-Logger"
-    )
     stats_thread.start()
     logger.debug("[STATS] Started statistics logging thread")
 
-    # Serial watchdog: force reconnect if no data received for this many seconds
-    serial_cfg = state.config.get('serial', {})
-    watchdog_timeout = serial_cfg.get('watchdog_timeout', 900)
+    # Watchdog: force reconnect if no data received for this many seconds.
+    transport_name = resolve_transport(state.config)
+    transport_label = "CoC" if transport_name == "coc" else "Serial"
+    transport_cfg = state.config.get(transport_name, {})
+    watchdog_timeout = transport_cfg.get('watchdog_timeout', 900)
     watchdog_logged = False
     last_reconnect_attempt = 0.0
     reconnect_interval = 5  # seconds between retry attempts
@@ -189,24 +258,27 @@ def run(state: BridgeState) -> None:
 
             try:
                 if state.device:
-                    line = state.device.read_line()
-                    if line:
-                        logger.debug(f"RX: {line}")
-                        message_parser.parse_and_publish(state, line)
+                    if not state.device.is_open:
+                        logger.warning("Device transport disconnected, reconnecting")
+                        state.device.close()
+                        state.device = _connect_device(state, transport_factory)
+                        sleep(0.5)
+                        continue
+                    if process_device_line(state):
                         watchdog_logged = False
 
                     # Watchdog: detect silently dead serial connections
                     elif state.device.seconds_since_activity() > watchdog_timeout:
                         if not watchdog_logged:
                             logger.warning(
-                                f"Serial watchdog: no data received for "
+                                f"{transport_label} watchdog: no data received for "
                                 f"{int(state.device.seconds_since_activity())}s "
                                 f"(threshold: {watchdog_timeout}s), forcing reconnect"
                             )
                         state.device.close()
-                        state.device = serial_connection.connect(state.config)
+                        state.device = _connect_device(state, transport_factory)
                         if state.device:
-                            logger.info("Serial watchdog: reconnected successfully")
+                            logger.info("%s watchdog: reconnected successfully", transport_label)
                             watchdog_logged = False
                         else:
                             watchdog_logged = True
@@ -216,20 +288,20 @@ def run(state: BridgeState) -> None:
                     now = time.time()
                     if now - last_reconnect_attempt >= reconnect_interval:
                         last_reconnect_attempt = now
-                        state.device = serial_connection.connect(state.config)
+                        state.device = _connect_device(state, transport_factory)
                         if state.device:
-                            logger.info("Serial reconnected successfully")
+                            logger.info("%s reconnected successfully", transport_label)
                             watchdog_logged = False
                         else:
                             if not watchdog_logged:
-                                logger.warning("Serial device unavailable, retrying every %ds", reconnect_interval)
+                                logger.warning("%s device unavailable, retrying every %ds", transport_label, reconnect_interval)
                                 watchdog_logged = True
 
             except OSError:
-                logger.warning("Serial connection unavailable, trying to reconnect")
+                logger.warning("%s connection unavailable, trying to reconnect", transport_label)
                 if state.device:
                     state.device.close()
-                state.device = serial_connection.connect(state.config)
+                state.device = _connect_device(state, transport_factory)
                 sleep(0.5)
 
             sleep(0.01)
@@ -238,8 +310,6 @@ def run(state: BridgeState) -> None:
         logger.info("\nExiting...")
     except Exception as e:
         logger.exception(f"Unhandled error in main loop: {e}")
-    finally:
-        _cleanup(state, stats_thread)
 
 
 def _cleanup(state: BridgeState, stats_thread: threading.Thread) -> None:
