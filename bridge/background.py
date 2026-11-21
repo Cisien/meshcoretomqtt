@@ -20,10 +20,13 @@ def stats_logging_loop(state: BridgeState) -> None:
     stats_interval = 300
 
     while not state.should_exit:
-        sleep(stats_interval)
+        refresh_requested = state.device_stats_refresh_event.wait(stats_interval)
 
         if state.should_exit:
             break
+
+        if refresh_requested:
+            state.device_stats_refresh_event.clear()
 
         # Fetch fresh device stats from serial
         logger.debug("[STATS] Fetching fresh device stats from serial...")
