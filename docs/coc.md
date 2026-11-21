@@ -8,8 +8,8 @@ the same parser and MQTT configuration as the USB serial transport.
 This setup requires Linux with BlueZ and systemd. The prebuilt helper runs on
 Debian 12, Raspberry Pi OS Bookworm and newer glibc-based systems.
 
-The repeater needs the [CoC firmware](https://github.com/throny/meshcore-ble-observer/releases/tag/v1.18.0-coc)
-and must be [enrolled with the receiving computer](https://github.com/throny/meshcore-ble-observer/blob/main/docs/enrollment.md).
+The repeater needs the [CoC firmware](https://github.com/throny/MeshCore/releases/tag/v1.18.0-coc.2)
+and must be [enrolled with the receiving computer](https://github.com/throny/MeshCore/blob/observer-coc/docs/observer/enrollment.md).
 Enrollment is done through the repeater's USB console before starting the bridge.
 
 CoC support is currently in [PR #74](https://github.com/Cisien/meshcoretomqtt/pull/74),

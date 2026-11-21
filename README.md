@@ -27,8 +27,11 @@ are available for x86-64, ARM64 and ARMv7.
 USB serial remains the default. See [Bluetooth setup](docs/coc.md) to select CoC
 and configure the existing service. Your MQTT configuration stays in place.
 
-I've been running this on a P1-Pro with a Linux host since October 28. Battery
-use looks normal so far.
+Repeater firmware: [v1.18.0-coc.2](https://github.com/throny/MeshCore/releases/tag/v1.18.0-coc.2).
+
+A development build of the firmware has been running on one P1-Pro with a Linux host
+since October 28. The published v1.18.0-coc.2 image has not been run on hardware yet.
+I have not measured power use; there are no battery numbers.
 
 ## Quick Install
 
