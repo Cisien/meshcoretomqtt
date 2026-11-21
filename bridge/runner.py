@@ -76,12 +76,20 @@ def wait_for_system_time_sync(state: BridgeState) -> bool:
     return True
 
 
+def _reconnect_device(state: BridgeState):
+    """Reconnect the serial device and request a fresh stats poll."""
+    device = serial_connection.connect(state.config)
+    if device:
+        state.device_stats_refresh_event.set()
+    return device
+
+
 def run(state: BridgeState) -> None:
     """Main orchestration: connect serial, query device, connect MQTT, read loop."""
     log_config_sources(state.config)
 
     # Connect serial
-    state.device = serial_connection.connect(state.config)
+    state.device = _reconnect_device(state)
     if not state.device:
         return
 
@@ -204,7 +212,7 @@ def run(state: BridgeState) -> None:
                                 f"(threshold: {watchdog_timeout}s), forcing reconnect"
                             )
                         state.device.close()
-                        state.device = serial_connection.connect(state.config)
+                        state.device = _reconnect_device(state)
                         if state.device:
                             logger.info("Serial watchdog: reconnected successfully")
                             watchdog_logged = False
@@ -216,7 +224,7 @@ def run(state: BridgeState) -> None:
                     now = time.time()
                     if now - last_reconnect_attempt >= reconnect_interval:
                         last_reconnect_attempt = now
-                        state.device = serial_connection.connect(state.config)
+                        state.device = _reconnect_device(state)
                         if state.device:
                             logger.info("Serial reconnected successfully")
                             watchdog_logged = False
@@ -229,7 +237,7 @@ def run(state: BridgeState) -> None:
                 logger.warning("Serial connection unavailable, trying to reconnect")
                 if state.device:
                     state.device.close()
-                state.device = serial_connection.connect(state.config)
+                state.device = _reconnect_device(state)
                 sleep(0.5)
 
             sleep(0.01)
@@ -246,6 +254,7 @@ def _cleanup(state: BridgeState, stats_thread: threading.Thread) -> None:
     """Shut down background threads, publish offline status, and close connections."""
     logger.info("Cleaning up...")
     state.should_exit = True
+    state.device_stats_refresh_event.set()
 
     # Stop WebSocket ping threads
     if state.mqtt_manager:

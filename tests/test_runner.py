@@ -250,3 +250,37 @@ class TestNullDeviceReconnection:
             watchdog_logged = False
         assert state.device is new_device
         assert watchdog_logged is False
+
+
+class TestReconnectStatsRefresh:
+    def test_runtime_reconnect_signals_stats_only_when_connected(self):
+        from bridge import runner
+
+        state = make_test_state(device=None)
+        refresh_event = getattr(state, "device_stats_refresh_event", None)
+        assert refresh_event is not None, "BridgeState must expose a stats refresh event"
+        reconnect = getattr(runner, "_reconnect_device", None)
+        assert callable(reconnect), "runner must centralize runtime reconnect handling"
+
+        connected = FakeSerialConnection()
+        with patch("bridge.runner.serial_connection.connect", return_value=connected):
+            assert reconnect(state) is connected
+        assert refresh_event.is_set()
+
+        refresh_event.clear()
+        with patch("bridge.runner.serial_connection.connect", return_value=None):
+            assert reconnect(state) is None
+        assert not refresh_event.is_set()
+
+    def test_cleanup_wakes_stats_worker(self):
+        import threading
+        from bridge import runner
+
+        state = make_test_state(device=None)
+        refresh_event = getattr(state, "device_stats_refresh_event", None)
+        assert refresh_event is not None, "BridgeState must expose a stats refresh event"
+
+        runner._cleanup(state, threading.Thread())
+
+        assert state.should_exit is True
+        assert refresh_event.is_set()

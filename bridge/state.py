@@ -62,6 +62,7 @@ class BridgeState:
 
         # Lifecycle
         self.should_exit: bool = False
+        self.device_stats_refresh_event = threading.Event()
 
         # Config-derived values
         self.global_iata: str = config.get('general', {}).get('iata', 'XXX')
