@@ -164,3 +164,29 @@ class TestReconnectBehavior:
 
         assert state.mqtt_clients[1]['reconnect_delay'] == pytest.approx(1.5, rel=1e-3), \
             "broker 1 first failure must grow from 1.0, not from broker 0's grown value"
+
+
+class TestOwnerClaims:
+    def _token_claims(self, owner: str, email: str) -> dict:
+        from tests.fakes import FakeAuthProvider
+        from auth_token import decode_token_payload
+
+        config = make_config()
+        config['broker'][0].update({
+            'tls': {'enabled': True, 'verify': True},
+            'auth': {'method': 'token', 'audience': 'localhost', 'owner': owner, 'email': email},
+        })
+        state = make_test_state(
+            config=config,
+            auth=FakeAuthProvider(),
+            repeater_pub_key="AA" * 32,
+            repeater_priv_key="BB" * 64,
+        )
+        manager = MqttManager(state)
+        _, token = manager._generate_auth_credentials(0)
+        return decode_token_payload(token)
+
+    def test_owner_claim_is_uppercased(self):
+        claims = self._token_claims("ab" * 32, "Owner@Example.com")
+        assert claims['owner'] == "AB" * 32
+        assert claims['email'] == "owner@example.com"
