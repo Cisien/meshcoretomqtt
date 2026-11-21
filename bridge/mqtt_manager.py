@@ -327,7 +327,7 @@ class MqttManager:
 
                 if secure_connection:
                     if owner:
-                        claims['owner'] = owner
+                        claims['owner'] = owner.upper()
                     if email:
                         claims['email'] = email.lower()
                 else:
