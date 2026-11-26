@@ -1,6 +1,7 @@
 """Tests for MqttManager orchestration."""
 from __future__ import annotations
 
+import threading
 import time
 from unittest.mock import patch
 
@@ -164,3 +165,93 @@ class TestReconnectBehavior:
 
         assert state.mqtt_clients[1]['reconnect_delay'] == pytest.approx(1.5, rel=1e-3), \
             "broker 1 first failure must grow from 1.0, not from broker 0's grown value"
+
+
+class TestInitialConnectFailure:
+    def _make_manager(self):
+        config = make_config()
+        config['broker'] = [
+            {'name': 'b0', 'enabled': True, 'server': 'host0', 'port': 1883,
+             'transport': 'tcp', 'qos': 0, 'retain': False,
+             'auth': {'method': 'none'}, 'tls': {'enabled': False}},
+            {'name': 'b1', 'enabled': True, 'server': 'host1', 'port': 1883,
+             'transport': 'tcp', 'qos': 0, 'retain': False,
+             'auth': {'method': 'none'}, 'tls': {'enabled': False}},
+        ]
+        state = make_test_state(config=config, repeater_name="Node", repeater_pub_key="AA" * 32)
+        manager = MqttManager(state)
+        state.mqtt_manager = manager
+        return state, manager
+
+    @staticmethod
+    def _ok_info(idx):
+        return {
+            'client': FakeBrokerClient(), 'broker_idx': idx, 'connected': True,
+            'connecting_since': 0, 'connect_time': time.time(), 'reconnect_at': 0,
+            'reconnect_delay': 1.0, 'failed_attempts': 0,
+        }
+
+    def _connect(self, state, manager):
+        # broker 0 fails its initial connect, broker 1 succeeds
+        results = {0: None, 1: self._ok_info(1)}
+        state.mqtt_connected = True
+        with patch.object(manager, '_create_and_connect_broker', side_effect=lambda i: results[i]),                 patch.object(threading.Event, 'wait', return_value=True):
+            return manager.connect_all_brokers()
+
+    def test_failed_initial_connect_stays_tracked(self):
+        state, manager = self._make_manager()
+        assert self._connect(state, manager) is True
+
+        assert [i['broker_idx'] for i in state.mqtt_clients] == [0, 1]
+        placeholder = state.mqtt_clients[0]
+        assert placeholder['client'] is None
+        assert placeholder['connected'] is False
+        assert placeholder['failed_attempts'] == 1
+        assert placeholder['reconnect_at'] > 0
+
+    def test_failed_initial_connect_is_retried(self):
+        state, manager = self._make_manager()
+        self._connect(state, manager)
+        state.mqtt_clients[0]['reconnect_at'] = 0
+
+        recovered = self._ok_info(0)
+        recovered['connected'] = False
+        with patch.object(manager, '_create_and_connect_broker', return_value=recovered) as create:
+            manager.reconnect_disconnected_brokers()
+
+        create.assert_called_once_with(0)
+        assert state.mqtt_clients[0] is recovered
+
+    def test_failed_initial_connect_uses_backoff_and_attempt_limit(self):
+        state, manager = self._make_manager()
+        self._connect(state, manager)
+        state.mqtt_clients[0]['reconnect_at'] = 0
+
+        with patch.object(manager, '_create_and_connect_broker', return_value=None):
+            manager.reconnect_disconnected_brokers()
+        assert state.mqtt_clients[0]['failed_attempts'] == 2
+        assert state.mqtt_clients[0]['reconnect_delay'] == pytest.approx(state.reconnect_backoff)
+
+        state.mqtt_clients[0]['failed_attempts'] = state.max_reconnect_attempts
+        state.mqtt_clients[0]['reconnect_at'] = 0
+        manager.reconnect_disconnected_brokers()
+        assert state.should_exit is True
+
+    def test_status_total_counts_failed_broker(self):
+        state, manager = self._make_manager()
+        self._connect(state, manager)
+        total = len(state.mqtt_clients)
+        connected = sum(1 for info in state.mqtt_clients if info.get('connected', False))
+        assert (connected, total) == (1, 2)
+
+    def test_no_client_created_returns_false(self):
+        state, manager = self._make_manager()
+        with patch.object(manager, '_create_and_connect_broker', return_value=None):
+            assert manager.connect_all_brokers() is False
+
+    def test_retrying_connect_all_does_not_duplicate_entries(self):
+        state, manager = self._make_manager()
+        with patch.object(manager, '_create_and_connect_broker', return_value=None):
+            manager.connect_all_brokers()
+            manager.connect_all_brokers()
+        assert len(state.mqtt_clients) == 2

@@ -270,6 +270,8 @@ def _cleanup(state: BridgeState, stats_thread: threading.Thread) -> None:
 
     # Disconnect MQTT clients
     for mqtt_info in state.mqtt_clients:
+        if mqtt_info['client'] is None:
+            continue
         try:
             mqtt_info['client'].loop_stop()
             mqtt_info['client'].disconnect()
