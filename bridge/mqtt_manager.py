@@ -53,6 +53,16 @@ class MqttManager:
                 logger.debug(f"  [{name}] DISABLED")
         logger.debug("=================================")
 
+        # Drop entries from a previous attempt so retries don't duplicate brokers
+        for old_info in state.mqtt_clients:
+            if old_info['client'] is not None:
+                try:
+                    old_info['client'].loop_stop()
+                    old_info['client'].disconnect()
+                except Exception:
+                    pass
+        state.mqtt_clients.clear()
+
         for i, broker in enumerate(brokers):
             state.connection_events[i] = threading.Event()
 
@@ -60,16 +70,32 @@ class MqttManager:
             if client_info:
                 state.mqtt_clients.append(client_info)
                 client_info['client'].loop_start()
+            elif broker.get('enabled', False) and broker.get('server', ''):
+                # Keep failed brokers tracked so reconnect_disconnected_brokers() retries them
+                state.mqtt_clients.append({
+                    'client': None,
+                    'broker_idx': i,
+                    'server': broker.get('server', ''),
+                    'port': broker.get('port', 1883),
+                    'connected': False,
+                    'connecting_since': 0,
+                    'connect_time': 0,
+                    'reconnect_at': time.time() + 1.0,
+                    'reconnect_delay': 1.0,
+                    'failed_attempts': 1
+                })
 
-        if len(state.mqtt_clients) == 0:
+        if not any(info['client'] is not None for info in state.mqtt_clients):
             logger.error("[MQTT] Failed to connect to any broker")
             return False
 
-        logger.info(f"[MQTT] Initiated connection to {len(state.mqtt_clients)} broker(s)")
+        logger.info(f"[MQTT] Initiated connection to {sum(1 for info in state.mqtt_clients if info['client'] is not None)} broker(s)")
 
         # Wait for all brokers to complete initial connection attempt
         max_wait = 10
         for mqtt_info in state.mqtt_clients:
+            if mqtt_info['client'] is None:
+                continue
             broker_idx = mqtt_info['broker_idx']
             event = state.connection_events.get(broker_idx)
             if event:

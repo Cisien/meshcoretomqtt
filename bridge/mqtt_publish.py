@@ -45,8 +45,11 @@ def safe_publish(
         if not topic:
             continue
 
+        broker_client = mqtt_client_info['client']
+        if broker_client is None:
+            continue
+
         try:
-            broker_client = mqtt_client_info['client']
             qos = broker.get('qos', 0)
             if qos == 1:
                 qos = 0  # force qos=1 to 0 because qos 1 can cause retry storms
